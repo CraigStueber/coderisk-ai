@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from coderisk_ai.detectors.sql_injection import detect_sql_injection
+from coderisk_ai.detectors.unsafe_deserialization import detect_unsafe_deserialization
 
 
 
@@ -21,14 +22,26 @@ def build_result(target_path: str) -> dict:
     language = "unknown"
     file_count = 0
 
+    def analyze_file(fp: Path):
+        nonlocal findings
+        source = fp.read_text(encoding="utf-8", errors="replace")
+        file_path = str(fp).replace("\\", "/")
+        findings.extend(detect_sql_injection(source=source, file_path=file_path))
+        findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
+
     if p.is_file():
         file_count = 1
-        # v0.1: assume python if .py
         language = "python" if p.suffix.lower() == ".py" else "unknown"
-        source = p.read_text(encoding="utf-8", errors="replace")
-        findings = detect_sql_injection(source=source, file_path=str(p).replace("\\", "/"))
+        analyze_file(p)
+
+    elif p.is_dir():
+        py_files = list(p.rglob("*.py"))
+        file_count = len(py_files)
+        language = "python"
+        for fp in py_files:
+            analyze_file(fp)
+
     else:
-        # v0.1: file-only analysis (keep it bounded)
         findings = []
 
     # Severity counts
@@ -38,11 +51,21 @@ def build_result(target_path: str) -> dict:
         if sev in sev_counts:
             sev_counts[sev] += 1
 
-    # OWASP rollup (v0.1: only A03 for now)
-    a03_score = clamp(sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A03_injection"), 0.0, 10.0)
+    # OWASP rollup (v0.1: A03 + A08)
+    a03_score = clamp(
+        sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A03_injection"),
+        0.0,
+        10.0,
+    )
+    a08_score = clamp(
+        sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A08_integrity_failures"),
+        0.0,
+        10.0,
+    )
     owasp = {}
     if findings:
         owasp["A03_injection"] = round(a03_score, 2)
+        owasp["A08_integrity_failures"] = round(a08_score, 2)
 
     # CVSS-like quick rollup (simple placeholder)
     # If we have any A03 finding, assume higher impact/exploitability.
