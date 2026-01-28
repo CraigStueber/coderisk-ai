@@ -100,6 +100,10 @@ def detect_cryptographic_failures(source: str, file_path: str) -> list[dict[str,
         if idx in found_lines:
             continue
 
+        # Skip commented-out lines
+        if line.lstrip().startswith('#'):
+            continue
+
         # Check for hardcoded secrets
         secret_match = _SECRET_VAR_PATTERN.search(line)
         if secret_match:
@@ -117,8 +121,8 @@ def detect_cryptographic_failures(source: str, file_path: str) -> list[dict[str,
                         "who gain access to the codebase. Secrets should be stored in environment "
                         "variables, secure vaults, or configuration management systems."
                     ),
-                    impact_f=8.0,
-                    exploitability_f=7.0,
+                    impact_f=9.0,
+                    exploitability_f=8.0,
                     confidence_f=0.80,
                     cwe_refs=["CWE-798", "CWE-259"],
                 )
@@ -143,8 +147,8 @@ def detect_cryptographic_failures(source: str, file_path: str) -> list[dict[str,
                         "security-sensitive operations. For password hashing, use bcrypt, scrypt, or Argon2. "
                         "For general cryptographic hashing, use SHA-256 or stronger algorithms from the SHA-2/SHA-3 families."
                     ),
-                    impact_f=7.0,
-                    exploitability_f=6.0,
+                    impact_f=8.5,
+                    exploitability_f=8.0,
                     confidence_f=0.85,
                     cwe_refs=["CWE-327", "CWE-328"],
                 )
@@ -170,8 +174,8 @@ def detect_cryptographic_failures(source: str, file_path: str) -> list[dict[str,
                         "Use the 'secrets' module instead (e.g., secrets.token_hex(), secrets.token_urlsafe(), "
                         "secrets.randbelow()) or os.urandom() for cryptographically strong random values."
                     ),
-                    impact_f=6.0,
-                    exploitability_f=5.0,
+                    impact_f=8.0,
+                    exploitability_f=7.0,
                     confidence_f=0.70,
                     cwe_refs=["CWE-338"],
                 )
