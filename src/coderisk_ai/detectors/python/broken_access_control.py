@@ -61,7 +61,13 @@ def _make_finding(
     exploit_scenario: str,
     recommended_fix: str,
 ) -> dict[str, Any]:
-    """Create a structured finding dict following CodeRisk AI schema."""
+    """Create a structured finding dict following CodeRisk AI schema.
+    
+    Scoring semantics (v0.1):
+    - rule_score: canonical base score for this rule instance (impact * exploitability * confidence)
+    - score_contribution: post-weight score for aggregation (currently == rule_score for v0.1)
+    - Future (v0.2+): score_contribution may apply additional context/weighting multipliers
+    """
     base_score_f = (impact_f * exploitability_f) / 10.0
     rule_score_f = round(base_score_f * confidence_f, 2)
     severity = _severity_from_score(base_score_f)
@@ -88,6 +94,40 @@ def _make_finding(
             {"type": "OWASP", "value": "A01:2021 Broken Access Control"},
         ],
     }
+
+
+# Public/auth endpoint allowlist for ACCESS_CONTROL.MISSING.FLASK_AUTH
+# These routes are typically public by design and should not require auth decorators
+_PUBLIC_ROUTE_PATTERNS = [
+    '/login', '/signin', '/sign_in', '/logout', '/signout', '/sign_out',
+    '/auth', '/auth/', '/oauth', '/oauth/', '/register', '/signup', '/sign_up',
+    '/health', '/healthz', '/ready', '/readyz', '/live', '/liveness',
+    '/metrics', '/status', '/ping',
+]
+
+
+def _extract_route_path(line: str) -> str | None:
+    """Extract route path from Flask @app.route() decorator.
+    Returns None if path cannot be extracted."""
+    match = re.search(r"@(?:app|bp|blueprint)\.route\s*\(\s*['\"]([^'\"]+)['\"]"  , line, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _is_public_route(route_path: str) -> bool:
+    """Check if route path matches public endpoint allowlist.
+    Rationale: login/auth/health endpoints should not require auth decorators.
+    """
+    if not route_path:
+        return False
+    
+    route_lower = route_path.lower()
+    for pattern in _PUBLIC_ROUTE_PATTERNS:
+        # Exact match or prefix match for patterns ending with '/'
+        if route_lower == pattern or (pattern.endswith('/') and route_lower.startswith(pattern)):
+            return True
+    return False
 
 
 def _check_nearby_auth(lines: list[str], route_idx: int, window: int = 5) -> bool:
@@ -164,6 +204,12 @@ def detect_broken_access_control(source: str, file_path: str) -> list[dict[str, 
 
         # Detect Flask routes
         if _FLASK_ROUTE.search(line):
+            # Extract route path and check if it's a public endpoint
+            route_path = _extract_route_path(line)
+            if route_path and _is_public_route(route_path):
+                # Skip public/auth endpoints - these are expected to be unauthenticated
+                continue
+            
             # Check for auth decorators nearby
             if not _check_nearby_auth(lines, idx - 1):  # idx-1 for 0-indexed lines list
                 findings.append(

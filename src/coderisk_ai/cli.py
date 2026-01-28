@@ -10,6 +10,7 @@ from coderisk_ai.detectors.python.cryptographic_failures import detect_cryptogra
 from coderisk_ai.detectors.python.sql_injection import detect_sql_injection
 from coderisk_ai.detectors.python.unsafe_deserialization import detect_unsafe_deserialization
 from coderisk_ai.detectors.python.security_misconfiguration import detect_security_misconfiguration
+from coderisk_ai.detectors.python.identification_authentication_failures import detect_identification_authentication_failures
 
 
 
@@ -34,6 +35,7 @@ def build_result(target_path: str) -> dict:
         findings.extend(detect_sql_injection(source=source, file_path=file_path))
         findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
         findings.extend(detect_security_misconfiguration(source=source, file_path=file_path))
+        findings.extend(detect_identification_authentication_failures(source=source, file_path=file_path))
 
     if p.is_file():
         file_count = 1
@@ -57,7 +59,7 @@ def build_result(target_path: str) -> dict:
         if sev in sev_counts:
             sev_counts[sev] += 1
 
-    # OWASP rollup (v0.1: A01 + A02 + A03 + A05 + A08)
+    # OWASP rollup (v0.1: A01 + A02 + A03 + A05 + A07 + A08)
     a01_score = clamp(
         max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A01_access_control"), default=0.0),
         0.0,
@@ -78,6 +80,11 @@ def build_result(target_path: str) -> dict:
         0.0,
         10.0,
     )
+    a07_score = clamp(
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A07_identification_authentication_failures"), default=0.0),
+        0.0,
+        10.0,
+    )
     a08_score = clamp(
         max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A08_integrity_failures"), default=0.0),
         0.0,
@@ -89,6 +96,7 @@ def build_result(target_path: str) -> dict:
         owasp["A02_cryptographic_failures"] = round(a02_score, 2)
         owasp["A03_injection"] = round(a03_score, 2)
         owasp["A05_security_misconfiguration"] = round(a05_score, 2)
+        owasp["A07_identification_authentication_failures"] = round(a07_score, 2)
         owasp["A08_integrity_failures"] = round(a08_score, 2)
 
     # CVSS-like quick rollup (simple placeholder)
