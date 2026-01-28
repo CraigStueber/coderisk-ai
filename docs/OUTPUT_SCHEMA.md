@@ -15,73 +15,74 @@ This document defines the **public output contract** for CodeRisk AI analysis re
 
 ### `analysis_result` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `schema_version` | string | ✅ | Output schema version (e.g., `"0.1"`). |
-| `analyzer` | object | ✅ | Information about the analyzer build/version. |
-| `target` | object | ✅ | What was analyzed (path, language, file count, etc.). |
-| `summary` | object | ✅ | Overall risk score, confidence, and rollups. |
-| `findings` | array | ✅ | List of detected issues and their evidence. |
-| `signals` | object | ✅ | Behavioral / probabilistic signals (LLM-specific risk factors). |
-| `metadata` | object | ❌ | Optional context (model, prompt style, run id, etc.). |
+| Field            | Type   | Required | Description                                                     |
+| ---------------- | ------ | -------- | --------------------------------------------------------------- |
+| `schema_version` | string | ✅       | Output schema version (e.g., `"0.1"`).                          |
+| `analyzer`       | object | ✅       | Information about the analyzer build/version.                   |
+| `target`         | object | ✅       | What was analyzed (path, language, file count, etc.).           |
+| `summary`        | object | ✅       | Overall risk score, confidence, and rollups.                    |
+| `findings`       | array  | ✅       | List of detected issues and their evidence.                     |
+| `signals`        | object | ✅       | Behavioral / probabilistic signals (LLM-specific risk factors). |
+| `metadata`       | object | ❌       | Optional context (model, prompt style, run id, etc.).           |
 
 ---
 
 ## `analyzer` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `name` | string | ✅ | Always `"coderisk-ai"`. |
-| `version` | string | ✅ | Analyzer version (SemVer recommended, e.g., `"0.0.1"`). |
-| `ruleset_version` | string | ✅ | Version of scoring rules/detectors (e.g., `"0.1"`). |
-| `timestamp_utc` | string | ✅ | ISO-8601 timestamp of analysis (UTC). |
+| Field             | Type   | Required | Description                                             |
+| ----------------- | ------ | -------- | ------------------------------------------------------- |
+| `name`            | string | ✅       | Always `"coderisk-ai"`.                                 |
+| `version`         | string | ✅       | Analyzer version (SemVer recommended, e.g., `"0.0.1"`). |
+| `ruleset_version` | string | ✅       | Version of scoring rules/detectors (e.g., `"0.1"`).     |
+| `timestamp_utc`   | string | ✅       | ISO-8601 timestamp of analysis (UTC).                   |
 
 ---
 
 ## `target` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `path` | string | ✅ | File or directory analyzed. |
-| `language` | string | ✅ | Primary language (e.g., `"python"`). |
-| `file_count` | integer | ✅ | Number of files analyzed. |
-| `files` | array | ❌ | Optional list of file descriptors (useful for multi-file runs). |
+| Field        | Type    | Required | Description                                                     |
+| ------------ | ------- | -------- | --------------------------------------------------------------- |
+| `path`       | string  | ✅       | File or directory analyzed.                                     |
+| `language`   | string  | ✅       | Primary language (e.g., `"python"`).                            |
+| `file_count` | integer | ✅       | Number of files analyzed.                                       |
+| `files`      | array   | ❌       | Optional list of file descriptors (useful for multi-file runs). |
 
 ### `target.files[]` (object, optional)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `file` | string | ✅ | Relative file path. |
-| `sha256` | string | ❌ | Hash for reproducibility (optional for now). |
-| `lines` | integer | ❌ | Line count (optional). |
+| Field    | Type    | Required | Description                                  |
+| -------- | ------- | -------- | -------------------------------------------- |
+| `file`   | string  | ✅       | Relative file path.                          |
+| `sha256` | string  | ❌       | Hash for reproducibility (optional for now). |
+| `lines`  | integer | ❌       | Line count (optional).                       |
 
 ---
 
 ## `summary` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `overall_score` | number | ✅ | 0–10 composite risk score (higher = riskier). |
-| `confidence` | number | ✅ | 0–1 stability/confidence estimate (higher = more stable). |
-| `severity_counts` | object | ✅ | Count of findings by severity. |
-| `owasp` | object | ✅ | OWASP-category rollup scores (0–10 each). |
-| `cvss_like` | object | ✅ | CVSS-inspired sub-scores (0–10 each). |
+| Field             | Type   | Required | Description                                               |
+| ----------------- | ------ | -------- | --------------------------------------------------------- |
+| `overall_score`   | number | ✅       | 0–10 composite risk score (higher = riskier).             |
+| `confidence`      | number | ✅       | 0–1 stability/confidence estimate (higher = more stable). |
+| `severity_counts` | object | ✅       | Count of findings by severity.                            |
+| `owasp`           | object | ✅       | OWASP-category rollup scores (0–10 each).                 |
+| `cvss_like`       | object | ✅       | CVSS-inspired sub-scores (0–10 each).                     |
 
 ### `summary.severity_counts` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `critical` | integer | ✅ | Count of critical findings. |
-| `high` | integer | ✅ | Count of high findings. |
-| `medium` | integer | ✅ | Count of medium findings. |
-| `low` | integer | ✅ | Count of low findings. |
-| `info` | integer | ✅ | Count of informational findings. |
+| Field      | Type    | Required | Description                      |
+| ---------- | ------- | -------- | -------------------------------- |
+| `critical` | integer | ✅       | Count of critical findings.      |
+| `high`     | integer | ✅       | Count of high findings.          |
+| `medium`   | integer | ✅       | Count of medium findings.        |
+| `low`      | integer | ✅       | Count of low findings.           |
+| `info`     | integer | ✅       | Count of informational findings. |
 
 ### `summary.owasp` (object)
 
 Key/value map where keys are OWASP-style identifiers and values are 0–10 scores.
 
 **Recommended key set (expand over time):**
+
 - `A01_broken_access_control`
 - `A02_cryptographic_failures`
 - `A03_injection`
@@ -97,12 +98,12 @@ Key/value map where keys are OWASP-style identifiers and values are 0–10 score
 
 ### `summary.cvss_like` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `impact` | number | ✅ | 0–10 estimated impact if exploited. |
-| `exploitability` | number | ✅ | 0–10 ease of exploitation. |
-| `prevalence` | number | ❌ | 0–10 how common this pattern is in the codebase (optional). |
-| `uncertainty_penalty` | number | ❌ | 0–10 penalty derived from instability/uncertainty (optional for now). |
+| Field                 | Type   | Required | Description                                                           |
+| --------------------- | ------ | -------- | --------------------------------------------------------------------- |
+| `impact`              | number | ✅       | 0–10 estimated impact if exploited.                                   |
+| `exploitability`      | number | ✅       | 0–10 ease of exploitation.                                            |
+| `prevalence`          | number | ❌       | 0–10 how common this pattern is in the codebase (optional).           |
+| `uncertainty_penalty` | number | ❌       | 0–10 penalty derived from instability/uncertainty (optional for now). |
 
 ---
 
@@ -110,34 +111,34 @@ Key/value map where keys are OWASP-style identifiers and values are 0–10 score
 
 ### `findings[]` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `id` | string | ✅ | Stable detector id (e.g., `"INJECTION.SQL.STRING_CONCAT"`). |
-| `title` | string | ✅ | Human-readable short title. |
-| `description` | string | ✅ | What was detected and why it matters. |
-| `category` | string | ✅ | High-level category (e.g., `"A03_injection"`). |
-| `severity` | string | ✅ | One of: `critical`, `high`, `medium`, `low`, `info`. |
-| `score_contribution` | number | ✅ | 0–10 contribution toward overall score (bounded). |
-| `confidence` | number | ✅ | 0–1 confidence for this specific finding. |
-| `evidence` | object | ✅ | Evidence and location details. |
-| `references` | array | ❌ | Optional references (CWE, OWASP, docs). |
+| Field                | Type   | Required | Description                                                 |
+| -------------------- | ------ | -------- | ----------------------------------------------------------- |
+| `id`                 | string | ✅       | Stable detector id (e.g., `"INJECTION.SQL.STRING_CONCAT"`). |
+| `title`              | string | ✅       | Human-readable short title.                                 |
+| `description`        | string | ✅       | What was detected and why it matters.                       |
+| `category`           | string | ✅       | High-level category (e.g., `"A03_injection"`).              |
+| `severity`           | string | ✅       | One of: `critical`, `high`, `medium`, `low`, `info`.        |
+| `score_contribution` | number | ✅       | 0–10 contribution toward overall score (bounded).           |
+| `confidence`         | number | ✅       | 0–1 confidence for this specific finding.                   |
+| `evidence`           | object | ✅       | Evidence and location details.                              |
+| `references`         | array  | ❌       | Optional references (CWE, OWASP, docs).                     |
 
 ### `findings[].evidence` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `file` | string | ✅ | File path. |
-| `line_start` | integer | ✅ | Start line number (1-indexed). |
-| `line_end` | integer | ✅ | End line number (1-indexed). |
-| `snippet` | string | ❌ | Small code excerpt (keep short). |
-| `explanation` | string | ✅ | Plain-English explanation tied to this snippet. |
+| Field         | Type    | Required | Description                                     |
+| ------------- | ------- | -------- | ----------------------------------------------- |
+| `file`        | string  | ✅       | File path.                                      |
+| `line_start`  | integer | ✅       | Start line number (1-indexed).                  |
+| `line_end`    | integer | ✅       | End line number (1-indexed).                    |
+| `snippet`     | string  | ❌       | Small code excerpt (keep short).                |
+| `explanation` | string  | ✅       | Plain-English explanation tied to this snippet. |
 
 ### `findings[].references[]` (object, optional)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `type` | string | ✅ | e.g., `"CWE"`, `"OWASP"`, `"URL"`. |
-| `value` | string | ✅ | e.g., `"CWE-89"` or a URL. |
+| Field   | Type   | Required | Description                        |
+| ------- | ------ | -------- | ---------------------------------- |
+| `type`  | string | ✅       | e.g., `"CWE"`, `"OWASP"`, `"URL"`. |
+| `value` | string | ✅       | e.g., `"CWE-89"` or a URL.         |
 
 ---
 
@@ -145,34 +146,34 @@ Key/value map where keys are OWASP-style identifiers and values are 0–10 score
 
 Behavioral/probabilistic indicators common in AI-generated code. This is where CodeRisk AI differentiates.
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `hallucination_markers` | object | ✅ | Signals suggesting invented APIs, inconsistent imports, phantom calls. |
-| `nondeterminism_sensitivity` | object | ✅ | Stability risk under small changes (prompt/context variations). |
-| `dependency_volatility` | object | ✅ | Risk from unpinned/obscure/transitive dependencies. |
-| `notes` | array | ❌ | Optional freeform notes for explainability. |
+| Field                        | Type   | Required | Description                                                            |
+| ---------------------------- | ------ | -------- | ---------------------------------------------------------------------- |
+| `hallucination_markers`      | object | ✅       | Signals suggesting invented APIs, inconsistent imports, phantom calls. |
+| `nondeterminism_sensitivity` | object | ✅       | Stability risk under small changes (prompt/context variations).        |
+| `dependency_volatility`      | object | ✅       | Risk from unpinned/obscure/transitive dependencies.                    |
+| `notes`                      | array  | ❌       | Optional freeform notes for explainability.                            |
 
 ### `signals.hallucination_markers` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `level` | string | ✅ | `low` / `medium` / `high`. |
-| `indicators` | array | ✅ | List of detected hallucination-like patterns. |
+| Field        | Type   | Required | Description                                   |
+| ------------ | ------ | -------- | --------------------------------------------- |
+| `level`      | string | ✅       | `low` / `medium` / `high`.                    |
+| `indicators` | array  | ✅       | List of detected hallucination-like patterns. |
 
 ### `signals.nondeterminism_sensitivity` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `level` | string | ✅ | `low` / `medium` / `high`. |
-| `rationale` | string | ✅ | Why this level was assigned. |
+| Field       | Type   | Required | Description                  |
+| ----------- | ------ | -------- | ---------------------------- |
+| `level`     | string | ✅       | `low` / `medium` / `high`.   |
+| `rationale` | string | ✅       | Why this level was assigned. |
 
 ### `signals.dependency_volatility` (object)
 
-| Field | Type | Required | Description |
-|------|------|----------|-------------|
-| `level` | string | ✅ | `low` / `medium` / `high`. |
-| `unpinned_dependencies` | integer | ❌ | Count (optional). |
-| `suspicious_packages` | array | ❌ | Package names flagged (optional). |
+| Field                   | Type    | Required | Description                       |
+| ----------------------- | ------- | -------- | --------------------------------- |
+| `level`                 | string  | ✅       | `low` / `medium` / `high`.        |
+| `unpinned_dependencies` | integer | ❌       | Count (optional).                 |
+| `suspicious_packages`   | array   | ❌       | Package names flagged (optional). |
 
 ---
 
@@ -181,6 +182,7 @@ Behavioral/probabilistic indicators common in AI-generated code. This is where C
 Use this for context that should not affect scoring unless explicitly configured.
 
 Suggested fields:
+
 - `source_model` (string) — e.g., `"copilot"`, `"gpt-4.1"`, `"claude"`
 - `prompt_style` (string) — e.g., `"freeform"`, `"structured"`
 - `prompt_hash` (string) — reproducibility without storing prompt
@@ -205,7 +207,6 @@ Suggested fields:
     "language": "python",
     "file_count": 1
   },
-  
   "summary": {
     "overall_score": 7.2,
     "confidence": 0.68,
@@ -262,3 +263,4 @@ Suggested fields:
     }
   ]
 }
+```
