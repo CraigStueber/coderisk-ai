@@ -3,6 +3,7 @@ from .cryptographic_failures import detect_cryptographic_failures
 from .sql_injection import detect_sql_injection
 from .unsafe_deserialization import detect_unsafe_deserialization
 from .security_misconfiguration import detect_security_misconfiguration
+from .identification_authentication_failures import detect_identification_authentication_failures
 
 __all__ = [
     "detect_broken_access_control",
@@ -10,4 +11,5 @@ __all__ = [
     "detect_sql_injection",
     "detect_unsafe_deserialization",
     "detect_security_misconfiguration",
+    "detect_identification_authentication_failures",
 ]
