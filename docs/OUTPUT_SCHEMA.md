@@ -59,13 +59,15 @@ This document defines the **public output contract** for CodeRisk AI analysis re
 
 ## `summary` (object)
 
-| Field             | Type   | Required | Description                                               |
-| ----------------- | ------ | -------- | --------------------------------------------------------- |
-| `overall_score`   | number | ✅       | 0–10 composite risk score (higher = riskier).             |
-| `confidence`      | number | ✅       | 0–1 stability/confidence estimate (higher = more stable). |
-| `severity_counts` | object | ✅       | Count of findings by severity.                            |
-| `owasp`           | object | ✅       | OWASP-category rollup scores (0–10 each).                 |
-| `cvss_like`       | object | ✅       | CVSS-inspired sub-scores (0–10 each).                     |
+| Field             | Type   | Required | Description                                                         |
+| ----------------- | ------ | -------- | ------------------------------------------------------------------- |
+| `overall_score`   | number | ✅       | 0–10 composite risk score (higher = riskier).                       |
+| `confidence`      | number | ✅       | 0–1 stability/confidence estimate (higher = more stable).           |
+| `scoring_model`   | string | ✅       | Scoring model used (e.g., "max_category").                          |
+| `score_rationale` | string | ✅       | Human-readable explanation of how the overall score was calculated. |
+| `severity_counts` | object | ✅       | Count of findings by severity.                                      |
+| `owasp`           | object | ✅       | OWASP-category rollup scores (0–10 each).                           |
+| `cvss_like`       | object | ✅       | CVSS-inspired sub-scores (0–10 each).                               |
 
 ### `summary.severity_counts` (object)
 
@@ -111,27 +113,34 @@ Key/value map where keys are OWASP-style identifiers and values are 0–10 score
 
 ### `findings[]` (object)
 
-| Field                | Type   | Required | Description                                                 |
-| -------------------- | ------ | -------- | ----------------------------------------------------------- |
-| `id`                 | string | ✅       | Stable detector id (e.g., `"INJECTION.SQL.STRING_CONCAT"`). |
-| `title`              | string | ✅       | Human-readable short title.                                 |
-| `description`        | string | ✅       | What was detected and why it matters.                       |
-| `category`           | string | ✅       | High-level category (e.g., `"A03_injection"`).              |
-| `severity`           | string | ✅       | One of: `critical`, `high`, `medium`, `low`, `info`.        |
-| `score_contribution` | number | ✅       | 0–10 contribution toward overall score (bounded).           |
-| `confidence`         | number | ✅       | 0–1 confidence for this specific finding.                   |
-| `evidence`           | object | ✅       | Evidence and location details.                              |
-| `references`         | array  | ❌       | Optional references (CWE, OWASP, docs).                     |
+| Field                | Type   | Required | Description                                                                                           |
+| -------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------- |
+| `id`                 | string | ✅       | Stable detector id (e.g., `"INJECTION.SQL.STRING_CONCAT"`).                                           |
+| `title`              | string | ✅       | Human-readable short title.                                                                           |
+| `description`        | string | ✅       | What was detected and why it matters.                                                                 |
+| `category`           | string | ✅       | High-level category (e.g., `"A03_injection"`).                                                        |
+| `severity`           | string | ✅       | One of: `critical`, `high`, `medium`, `low`, `info`.                                                  |
+| `rule_score`         | number | ✅       | 0–10 risk score for this rule (canonical field).                                                      |
+| `score_contribution` | number | ✅       | **DEPRECATED:** Alias for `rule_score` (backward compatibility only; will be removed in schema v0.2). |
+| `confidence`         | number | ✅       | 0–1 confidence (reflects strongest supported instance when per-instance confidence varies).           |
+| `exploit_scenario`   | string | ✅       | Brief description of how this could be exploited.                                                     |
+| `recommended_fix`    | string | ✅       | Brief description of the preferred remediation.                                                       |
+| `instances`          | array  | ✅       | List of specific occurrences of this finding.                                                         |
+| `references`         | array  | ❌       | Optional references (CWE, OWASP, docs).                                                               |
 
-### `findings[].evidence` (object)
+> **Note on `confidence`:** When instances have varying confidence levels, the finding-level confidence represents the maximum (strongest) instance confidence. This reflects the highest-certainty evidence supporting the finding.
 
-| Field         | Type    | Required | Description                                     |
-| ------------- | ------- | -------- | ----------------------------------------------- |
-| `file`        | string  | ✅       | File path.                                      |
-| `line_start`  | integer | ✅       | Start line number (1-indexed).                  |
-| `line_end`    | integer | ✅       | End line number (1-indexed).                    |
-| `snippet`     | string  | ❌       | Small code excerpt (keep short).                |
-| `explanation` | string  | ✅       | Plain-English explanation tied to this snippet. |
+> **Deprecation Notice:** `score_contribution` is maintained for backward compatibility in v0.1.x. Consumers should migrate to `rule_score`. The deprecated field will be removed in schema v0.2.### `findings[].instances[]` (object)
+
+| Field         | Type    | Required | Description                                               |
+| ------------- | ------- | -------- | --------------------------------------------------------- |
+| `file`        | string  | ✅       | File path.                                                |
+| `line_start`  | integer | ✅       | Start line number (1-indexed).                            |
+| `line_end`    | integer | ✅       | End line number (1-indexed).                              |
+| `snippet`     | string  | ❌       | Small code excerpt (keep short).                          |
+| `explanation` | string  | ✅       | Plain-English explanation tied to this snippet.           |
+| `algorithm`   | string  | ❌       | Optional metadata (e.g., `"md5"` for weak hash findings). |
+| `confidence`  | number  | ❌       | Optional per-instance confidence override (0–1).          |
 
 ### `findings[].references[]` (object, optional)
 
@@ -242,20 +251,26 @@ Suggested fields:
   },
   "findings": [
     {
-      "id": "INJECTION.SQL.STRING_CONCAT",
+      "rule_id": "INJECTION.SQL.STRING_CONCAT",
+      "id": "INJECTION.SQL.STRING_CONCAT:examples/injection_example.py:12",
       "title": "SQL injection via string concatenation",
       "description": "User input appears concatenated into an SQL query without parameterization.",
       "category": "A03_injection",
       "severity": "high",
+      "rule_score": 3.2,
       "score_contribution": 3.2,
       "confidence": 0.86,
-      "evidence": {
-        "file": "examples/injection_example.py",
-        "line_start": 12,
-        "line_end": 14,
-        "snippet": "query = \"SELECT * FROM users WHERE name='\" + name + \"'\"",
-        "explanation": "String concatenation of user-controlled input can allow attackers to modify the query."
-      },
+      "exploit_scenario": "Attacker injects malicious SQL through user input to read, modify, or delete database contents.",
+      "recommended_fix": "Use parameterized queries or ORM methods to safely handle user input in SQL statements.",
+      "instances": [
+        {
+          "file": "examples/injection_example.py",
+          "line_start": 12,
+          "line_end": 14,
+          "snippet": "query = \"SELECT * FROM users WHERE name='\" + name + \"'\"",
+          "explanation": "String concatenation of user-controlled input can allow attackers to modify the query."
+        }
+      ],
       "references": [
         { "type": "CWE", "value": "CWE-89" },
         { "type": "OWASP", "value": "A03:2021 Injection" }

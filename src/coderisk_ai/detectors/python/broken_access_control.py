@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .detector_utils import deduplicate_findings
+
 
 # v0.1: Heuristic-based patterns for broken access control detection
 # Focus on Flask and FastAPI route handlers missing authentication
@@ -56,10 +58,12 @@ def _make_finding(
     impact_f: float,
     exploitability_f: float,
     confidence_f: float,
+    exploit_scenario: str,
+    recommended_fix: str,
 ) -> dict[str, Any]:
     """Create a structured finding dict following CodeRisk AI schema."""
     base_score_f = (impact_f * exploitability_f) / 10.0
-    score_contribution_f = round(base_score_f * confidence_f, 2)
+    rule_score_f = round(base_score_f * confidence_f, 2)
     severity = _severity_from_score(base_score_f)
 
     return {
@@ -68,8 +72,10 @@ def _make_finding(
         "description": description,
         "category": "A01_access_control",
         "severity": severity,
-        "score_contribution": score_contribution_f,
+        "rule_score": rule_score_f,
         "confidence": confidence_f,
+        "exploit_scenario": exploit_scenario,
+        "recommended_fix": recommended_fix,
         "evidence": {
             "file": file_path,
             "line_start": line_no,
@@ -130,24 +136,28 @@ def detect_broken_access_control(source: str, file_path: str) -> list[dict[str, 
     for idx, line in enumerate(lines, start=1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
-            # Check for commented-out auth
+            # Check for commented-out auth (may be benign like documentation/examples)
             if _COMMENTED_AUTH.search(line):
                 findings.append(
                     _make_finding(
-                        finding_id="ACCESS_CONTROL.COMMENTED_AUTH",
-                        title="Commented-out authorization check",
-                        description="An authorization or access control check appears to be commented out, potentially leaving the code path unprotected.",
+                        finding_id="ACCESS_CONTROL.AUTH_CHECK_COMMENTED_OUT",
+                        title="Commented-out authorization check detected",
+                        description="An authorization check appears to be commented out (may be benign like documentation/examples, but often indicates disabled enforcement).",
                         file_path=file_path,
                         line_no=idx,
                         snippet=stripped,
                         explanation=(
                             "Detected a commented line containing authorization keywords like 'is_admin', "
-                            "'authorize(', 'check_permission(', or similar. This suggests access control "
-                            "may have been disabled or bypassed. Review whether this was intentional."
+                            "'authorize(', 'check_permission(', or similar. While this may be benign "
+                            "(documentation, commented example code), it often indicates that access control "
+                            "enforcement has been temporarily or permanently disabled. Review the context to "
+                            "determine if this represents an actual security risk."
                         ),
                         impact_f=8.0,
                         exploitability_f=7.0,
-                        confidence_f=0.75,
+                        confidence_f=0.60,
+                        exploit_scenario="Attacker accesses protected resources by exploiting disabled authorization checks.",
+                        recommended_fix="Remove commented code or restore authorization checks to enforce access control.",
                     )
                 )
             continue
@@ -173,6 +183,8 @@ def detect_broken_access_control(source: str, file_path: str) -> list[dict[str, 
                         impact_f=8.0,
                         exploitability_f=7.5,
                         confidence_f=0.70,
+                        exploit_scenario="Attacker directly accesses sensitive endpoints without authentication credentials.",
+                        recommended_fix="Add authentication decorator such as @login_required or @jwt_required to the route.",
                     )
                 )
 
@@ -197,7 +209,9 @@ def detect_broken_access_control(source: str, file_path: str) -> list[dict[str, 
                         impact_f=8.0,
                         exploitability_f=7.5,
                         confidence_f=0.70,
+                        exploit_scenario="Attacker directly accesses sensitive API endpoints without authentication.",
+                        recommended_fix="Add dependencies parameter to route decorator or use Depends() in function signature for authentication.",
                     )
                 )
 
-    return findings
+    return deduplicate_findings(findings)
