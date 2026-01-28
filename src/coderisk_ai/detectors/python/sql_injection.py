@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .detector_utils import deduplicate_findings
+
 
 _SQL_LINE_HINT = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 
@@ -50,7 +52,7 @@ def detect_sql_injection(source: str, file_path: str) -> list[dict[str, Any]]:
         confidence_f = 0.75 if has_concat else 0.65
 
         base_score_f = (impact_f * exploitability_f) / 10.0  # 6.4
-        score_contribution_f = round(base_score_f * confidence_f, 2)
+        rule_score_f = round(base_score_f * confidence_f, 2)
 
         severity = _severity_from_score(base_score_f + 1.0)  # nudge into high for this detector
 
@@ -68,8 +70,10 @@ def detect_sql_injection(source: str, file_path: str) -> list[dict[str, Any]]:
                 "description": "SQL keywords were found on a line that also appears to dynamically insert variables into the query.",
                 "category": "A03_injection",
                 "severity": severity,
-                "score_contribution": score_contribution_f,
+                "rule_score": rule_score_f,
                 "confidence": confidence_f,
+                "exploit_scenario": "Attacker injects malicious SQL through user input to read, modify, or delete database contents.",
+                "recommended_fix": "Use parameterized queries or ORM methods to safely handle user input in SQL statements.",
                 "evidence": {
                     "file": file_path,
                     "line_start": idx,
@@ -84,4 +88,4 @@ def detect_sql_injection(source: str, file_path: str) -> list[dict[str, Any]]:
             }
         )
 
-    return findings
+    return deduplicate_findings(findings)

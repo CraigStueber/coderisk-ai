@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .detector_utils import deduplicate_findings
+
 
 # v0.1: Heuristic-based patterns for cryptographic failures detection
 
@@ -15,6 +17,12 @@ _SECRET_VAR_PATTERN = re.compile(
 # Weak hashing algorithms
 _WEAK_HASH_PATTERN = re.compile(
     r'\bhashlib\.(md5|sha1)\s*\(',
+    re.IGNORECASE,
+)
+
+# Security-sensitive context for hashing (password, auth, tokens, etc.)
+_SECURITY_CONTEXT_PATTERN = re.compile(
+    r'\b(password|pwd|auth|token|secret|key|session|signature)\b',
     re.IGNORECASE,
 )
 
@@ -55,10 +63,12 @@ def _make_finding(
     exploitability_f: float,
     confidence_f: float,
     cwe_refs: list[str],
+    exploit_scenario: str,
+    recommended_fix: str,
 ) -> dict[str, Any]:
     """Create a structured finding dict following CodeRisk AI schema."""
     base_score_f = (impact_f * exploitability_f) / 10.0
-    score_contribution_f = round(base_score_f * confidence_f, 2)
+    rule_score_f = round(base_score_f * confidence_f, 2)
     severity = _severity_from_score(base_score_f)
 
     references = [{"type": "CWE", "value": cwe} for cwe in cwe_refs]
@@ -70,8 +80,10 @@ def _make_finding(
         "description": description,
         "category": "A02_cryptographic_failures",
         "severity": severity,
-        "score_contribution": score_contribution_f,
+        "rule_score": rule_score_f,
         "confidence": confidence_f,
+        "exploit_scenario": exploit_scenario,
+        "recommended_fix": recommended_fix,
         "evidence": {
             "file": file_path,
             "line_start": line_no,
@@ -125,6 +137,8 @@ def detect_cryptographic_failures(source: str, file_path: str) -> list[dict[str,
                     exploitability_f=8.0,
                     confidence_f=0.80,
                     cwe_refs=["CWE-798", "CWE-259"],
+                    exploit_scenario="Attacker with repository access extracts hardcoded credentials to compromise the system.",
+                    recommended_fix="Store secrets in environment variables or a secure vault service and reference them at runtime.",
                 )
             )
             continue
@@ -133,26 +147,50 @@ def detect_cryptographic_failures(source: str, file_path: str) -> list[dict[str,
         weak_hash_match = _WEAK_HASH_PATTERN.search(line)
         if weak_hash_match:
             found_lines.add(idx)
-            algorithm = weak_hash_match.group(1).upper()
-            findings.append(
-                _make_finding(
-                    finding_id="CRYPTO.WEAK.HASH",
-                    title=f"Weak hashing algorithm detected: {algorithm}",
-                    description=f"Usage of cryptographically weak {algorithm} hashing algorithm.",
-                    file_path=file_path,
-                    line_no=idx,
-                    snippet=line.strip(),
-                    explanation=(
-                        f"{algorithm} is considered cryptographically weak and should not be used for "
-                        "security-sensitive operations. For password hashing, use bcrypt, scrypt, or Argon2. "
-                        "For general cryptographic hashing, use SHA-256 or stronger algorithms from the SHA-2/SHA-3 families."
-                    ),
-                    impact_f=8.5,
-                    exploitability_f=8.0,
-                    confidence_f=0.85,
-                    cwe_refs=["CWE-327", "CWE-328"],
+            algorithm = weak_hash_match.group(1).lower()  # md5 or sha1
+            
+            # Check if this is in a security-sensitive context
+            # Look at the line and surrounding variable/function names
+            in_security_context = _SECURITY_CONTEXT_PATTERN.search(line)
+            
+            # If security context detected, use high severity; otherwise medium
+            if in_security_context:
+                impact_f = 9.0  # High severity for security-sensitive usage
+                explanation = (
+                    "This weak hashing algorithm is used in a security-sensitive context (password, auth, token, etc.). "
+                    "For password hashing, use bcrypt, scrypt, or Argon2. For general cryptographic hashing, "
+                    "use SHA-256 or stronger algorithms from the SHA-2/SHA-3 families."
                 )
+                exploit_scenario = "Attacker performs offline cracking or credential compromise using weak hash algorithm."
+                recommended_fix = "Use bcrypt, scrypt, or Argon2 for password hashing; SHA-256+ for general cryptographic needs."
+            else:
+                impact_f = 6.5  # Medium severity for general usage
+                explanation = (
+                    "This weak hashing algorithm is used for general purposes. While not immediately exploitable, "
+                    "it may allow collisions that undermine integrity checks or cache keys. Use SHA-256 or stronger "
+                    "algorithms from the SHA-2/SHA-3 families."
+                )
+                exploit_scenario = "May allow collisions that undermine integrity checks or cache keys."
+                recommended_fix = "Replace with SHA-256 or stronger from SHA-2/SHA-3 families."
+            
+            finding = _make_finding(
+                finding_id="CRYPTO.WEAK.HASH",
+                title="Weak hashing algorithm detected",
+                description="Usage of cryptographically weak hashing algorithm.",
+                file_path=file_path,
+                line_no=idx,
+                snippet=line.strip(),
+                explanation=explanation,
+                impact_f=impact_f,
+                exploitability_f=8.0,
+                confidence_f=0.85,
+                cwe_refs=["CWE-327", "CWE-328"],
+                exploit_scenario=exploit_scenario,
+                recommended_fix=recommended_fix,
             )
+            # Store algorithm for per-instance metadata
+            finding["_algorithm"] = algorithm
+            findings.append(finding)
             continue
 
         # Check for insecure randomness in token-like contexts
@@ -176,10 +214,12 @@ def detect_cryptographic_failures(source: str, file_path: str) -> list[dict[str,
                     ),
                     impact_f=8.0,
                     exploitability_f=7.0,
+                    exploit_scenario="Attacker predicts weak random values to forge tokens or bypass authentication mechanisms.",
+                    recommended_fix="Replace random module usage with secrets module functions like secrets.token_hex() or secrets.token_urlsafe().",
                     confidence_f=0.70,
                     cwe_refs=["CWE-338"],
                 )
             )
             continue
 
-    return findings
+    return deduplicate_findings(findings)

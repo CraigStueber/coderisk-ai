@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .detector_utils import deduplicate_findings
+
 
 # v0.1: narrow, sink-based heuristics (no taint tracking yet)
 # High-signal sinks:
@@ -45,7 +47,7 @@ def _make_finding(
     confidence_f: float,
 ) -> dict[str, Any]:
     base_score_f = (impact_f * exploitability_f) / 10.0
-    score_contribution_f = round(base_score_f * confidence_f, 2)
+    rule_score_f = round(base_score_f * confidence_f, 2)
 
     # severity: based on base score (not confidence), which is more intuitive for reviewers
     severity = _severity_from_score(base_score_f)
@@ -56,6 +58,17 @@ def _make_finding(
         "Prefer safe formats (e.g., JSON) or safe loaders (e.g., yaml.safe_load / SafeLoader), "
         "and never deserialize untrusted data with pickle/marshal."
     )
+    
+    # Determine exploit scenario and fix based on sink type
+    if "pickle" in sink_name.lower():
+        exploit_scenario = "Attacker provides malicious pickle data to execute arbitrary code on the server."
+        recommended_fix = "Avoid pickle for untrusted data; use JSON or other safe serialization formats."
+    elif "marshal" in sink_name.lower():
+        exploit_scenario = "Attacker provides malicious marshal data to execute arbitrary code or corrupt application state."
+        recommended_fix = "Avoid marshal for untrusted data; use JSON or other safe serialization formats."
+    else:
+        exploit_scenario = "Attacker provides malicious YAML to execute code or manipulate application behavior."
+        recommended_fix = "Use yaml.safe_load() or SafeLoader instead of yaml.load()."
 
     return {
         "id": finding_id,
@@ -63,8 +76,10 @@ def _make_finding(
         "description": "A high-risk deserialization sink was detected. If the input is untrusted, this may lead to code execution.",
         "category": "A08_integrity_failures",
         "severity": severity,
-        "score_contribution": score_contribution_f,
+        "rule_score": rule_score_f,
         "confidence": confidence_f,
+        "exploit_scenario": exploit_scenario,
+        "recommended_fix": recommended_fix,
         "evidence": {
             "file": file_path,
             "line_start": line_no,
@@ -163,4 +178,4 @@ def detect_unsafe_deserialization(source: str, file_path: str) -> list[dict[str,
                 )
             )
 
-    return findings
+    return deduplicate_findings(findings)

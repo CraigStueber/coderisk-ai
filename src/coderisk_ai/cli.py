@@ -9,6 +9,7 @@ from coderisk_ai.detectors.python.broken_access_control import detect_broken_acc
 from coderisk_ai.detectors.python.cryptographic_failures import detect_cryptographic_failures
 from coderisk_ai.detectors.python.sql_injection import detect_sql_injection
 from coderisk_ai.detectors.python.unsafe_deserialization import detect_unsafe_deserialization
+from coderisk_ai.detectors.python.security_misconfiguration import detect_security_misconfiguration
 
 
 
@@ -32,6 +33,7 @@ def build_result(target_path: str) -> dict:
         findings.extend(detect_cryptographic_failures(source=source, file_path=file_path))
         findings.extend(detect_sql_injection(source=source, file_path=file_path))
         findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
+        findings.extend(detect_security_misconfiguration(source=source, file_path=file_path))
 
     if p.is_file():
         file_count = 1
@@ -55,24 +57,29 @@ def build_result(target_path: str) -> dict:
         if sev in sev_counts:
             sev_counts[sev] += 1
 
-    # OWASP rollup (v0.1: A01 + A02 + A03 + A08)
+    # OWASP rollup (v0.1: A01 + A02 + A03 + A05 + A08)
     a01_score = clamp(
-        sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A01_access_control"),
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A01_access_control"), default=0.0),
         0.0,
         10.0,
     )
     a02_score = clamp(
-        sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A02_cryptographic_failures"),
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A02_cryptographic_failures"), default=0.0),
         0.0,
         10.0,
     )
     a03_score = clamp(
-        sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A03_injection"),
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A03_injection"), default=0.0),
+        0.0,
+        10.0,
+    )
+    a05_score = clamp(
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A05_security_misconfiguration"), default=0.0),
         0.0,
         10.0,
     )
     a08_score = clamp(
-        sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A08_integrity_failures"),
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A08_integrity_failures"), default=0.0),
         0.0,
         10.0,
     )
@@ -81,6 +88,7 @@ def build_result(target_path: str) -> dict:
         owasp["A01_access_control"] = round(a01_score, 2)
         owasp["A02_cryptographic_failures"] = round(a02_score, 2)
         owasp["A03_injection"] = round(a03_score, 2)
+        owasp["A05_security_misconfiguration"] = round(a05_score, 2)
         owasp["A08_integrity_failures"] = round(a08_score, 2)
 
     # CVSS-like quick rollup (simple placeholder)
@@ -90,8 +98,12 @@ def build_result(target_path: str) -> dict:
         cvss_like["impact"] = 7.5
         cvss_like["exploitability"] = 7.0
 
-    # Overall score (v0.1 placeholder): use max OWASP category score (bounded)
-    overall_score = round(clamp(max(owasp.values()) if owasp else 0.0, 0.0, 10.0), 2)
+    # Overall score (v0.1): max of all OWASP category scores, capped at 10.0
+    # Rationale: Each category score already represents the highest-risk finding in that category.
+    # The overall risk is driven by the worst category, not the sum (which would penalize diverse issues).
+    # This approach: 1) keeps score bounded [0, 10], 2) highlights the most critical area,
+    # 3) avoids artificial inflation when multiple categories have findings.
+    overall_score = round(min(10.0, max(owasp.values()) if owasp else 0.0), 2)
 
     # Confidence (v0.1 placeholder):
     # Start at 0.7 if we found something; otherwise 0.5.
@@ -120,6 +132,8 @@ def build_result(target_path: str) -> dict:
         "summary": {
             "overall_score": overall_score,
             "confidence": confidence,
+            "scoring_model": "max_category",
+            "score_rationale": "Overall score equals the maximum OWASP category score to represent worst-case risk exposure",
             "severity_counts": sev_counts,
             "owasp": owasp,
             "cvss_like": cvss_like,
