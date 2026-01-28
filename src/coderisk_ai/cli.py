@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from coderisk_ai.detectors.python.broken_access_control import detect_broken_access_control
+from coderisk_ai.detectors.python.cryptographic_failures import detect_cryptographic_failures
 from coderisk_ai.detectors.python.sql_injection import detect_sql_injection
 from coderisk_ai.detectors.python.unsafe_deserialization import detect_unsafe_deserialization
 
@@ -28,6 +29,7 @@ def build_result(target_path: str) -> dict:
         source = fp.read_text(encoding="utf-8", errors="replace")
         file_path = str(fp).replace("\\", "/")
         findings.extend(detect_broken_access_control(source=source, file_path=file_path))
+        findings.extend(detect_cryptographic_failures(source=source, file_path=file_path))
         findings.extend(detect_sql_injection(source=source, file_path=file_path))
         findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
 
@@ -53,9 +55,14 @@ def build_result(target_path: str) -> dict:
         if sev in sev_counts:
             sev_counts[sev] += 1
 
-    # OWASP rollup (v0.1: A01 + A03 + A08)
+    # OWASP rollup (v0.1: A01 + A02 + A03 + A08)
     a01_score = clamp(
         sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A01_access_control"),
+        0.0,
+        10.0,
+    )
+    a02_score = clamp(
+        sum(f.get("score_contribution", 0.0) for f in findings if f.get("category") == "A02_cryptographic_failures"),
         0.0,
         10.0,
     )
@@ -72,6 +79,7 @@ def build_result(target_path: str) -> dict:
     owasp = {}
     if findings:
         owasp["A01_access_control"] = round(a01_score, 2)
+        owasp["A02_cryptographic_failures"] = round(a02_score, 2)
         owasp["A03_injection"] = round(a03_score, 2)
         owasp["A08_integrity_failures"] = round(a08_score, 2)
 
