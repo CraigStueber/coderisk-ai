@@ -1,0 +1,31 @@
+# Example pyproject.toml with unpinned dependencies (Poetry-style)
+
+[tool.poetry]
+name = "test-project"
+version = "0.1.0"
+description = "Test project for A06 detection"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+# Wildcard - very loose
+requests = "*"
+
+# Caret versioning - allows compatible updates
+flask = "^2.0.0"
+
+# Tilde versioning - allows patch updates
+django = "~4.0.0"
+
+# Good: Exact version (should NOT be flagged)
+numpy = "1.21.0"
+
+# Another caret version
+click = "^8.0"
+
+# Deprecated package with loose version
+pycrypto = "^2.6"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0"
+black = "*"

@@ -1,0 +1,29 @@
+# Example requirements.txt with unpinned dependencies
+# This file demonstrates various unpinned/loose version specifiers
+
+# No version specified at all - very loose
+requests
+
+# Loose >= operator - allows any newer version
+urllib3>=1.26.0
+
+# Loose > operator
+certifi>2020.1.1
+
+# Tilde operator - allows patch-level updates
+Flask~=2.0.0
+
+# Not-equal operator (still loose)
+Django!=3.0.0
+
+# Wildcard
+cryptography==*
+
+# Good: Properly pinned dependency (should NOT be flagged)
+numpy==1.21.0
+
+# Loose range
+Werkzeug>=1.0,<3.0
+
+# Another unpinned one
+click

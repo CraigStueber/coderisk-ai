@@ -11,6 +11,7 @@ from coderisk_ai.detectors.python.sql_injection import detect_sql_injection
 from coderisk_ai.detectors.python.unsafe_deserialization import detect_unsafe_deserialization
 from coderisk_ai.detectors.python.security_misconfiguration import detect_security_misconfiguration
 from coderisk_ai.detectors.python.identification_authentication_failures import detect_identification_authentication_failures
+from coderisk_ai.detectors.python.vulnerable_outdated_components import detect_vulnerable_outdated_components
 
 
 
@@ -30,12 +31,32 @@ def build_result(target_path: str) -> dict:
         nonlocal findings
         source = fp.read_text(encoding="utf-8", errors="replace")
         file_path = str(fp).replace("\\", "/")
-        findings.extend(detect_broken_access_control(source=source, file_path=file_path))
-        findings.extend(detect_cryptographic_failures(source=source, file_path=file_path))
-        findings.extend(detect_sql_injection(source=source, file_path=file_path))
-        findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
-        findings.extend(detect_security_misconfiguration(source=source, file_path=file_path))
-        findings.extend(detect_identification_authentication_failures(source=source, file_path=file_path))
+        
+        # Check if this is a dependency file
+        # Treat files whose basename contains "pyproject" as dependency manifests
+        file_lower = fp.name.lower()
+        is_dependency_file = (
+            "requirements" in file_lower or
+            "constraints" in file_lower or
+            file_lower == "pipfile" or
+            file_lower == "pipfile.lock" or
+            "pyproject" in file_lower or  # Any file with "pyproject" in name
+            file_lower == "poetry.lock" or
+            file_lower == "setup.cfg"
+        )
+        
+        # Run A06 detector on dependency files
+        if is_dependency_file:
+            findings.extend(detect_vulnerable_outdated_components(source=source, file_path=file_path))
+        
+        # Run standard detectors on Python files
+        if fp.suffix.lower() == ".py":
+            findings.extend(detect_broken_access_control(source=source, file_path=file_path))
+            findings.extend(detect_cryptographic_failures(source=source, file_path=file_path))
+            findings.extend(detect_sql_injection(source=source, file_path=file_path))
+            findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
+            findings.extend(detect_security_misconfiguration(source=source, file_path=file_path))
+            findings.extend(detect_identification_authentication_failures(source=source, file_path=file_path))
 
     if p.is_file():
         file_count = 1
@@ -44,9 +65,16 @@ def build_result(target_path: str) -> dict:
 
     elif p.is_dir():
         py_files = list(p.rglob("*.py"))
-        file_count = len(py_files)
+        # Also scan for dependency files
+        # Include any file with "pyproject" in basename (pyproject.toml, pyproject_unpinned.toml, etc.)
+        dep_files = []
+        for pattern in ["*requirements*", "*constraints*", "Pipfile", "Pipfile.lock", "*pyproject*", "poetry.lock", "setup.cfg"]:
+            dep_files.extend(p.rglob(pattern))
+        
+        all_files = py_files + dep_files
+        file_count = len(all_files)
         language = "python"
-        for fp in py_files:
+        for fp in all_files:
             analyze_file(fp)
 
     else:
@@ -59,7 +87,7 @@ def build_result(target_path: str) -> dict:
         if sev in sev_counts:
             sev_counts[sev] += 1
 
-    # OWASP rollup (v0.1: A01 + A02 + A03 + A05 + A07 + A08)
+    # OWASP rollup (v0.1: A01 + A02 + A03 + A05 + A06 + A07 + A08)
     a01_score = clamp(
         max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A01_access_control"), default=0.0),
         0.0,
@@ -80,6 +108,11 @@ def build_result(target_path: str) -> dict:
         0.0,
         10.0,
     )
+    a06_score = clamp(
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A06_vulnerable_outdated_components"), default=0.0),
+        0.0,
+        10.0,
+    )
     a07_score = clamp(
         max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A07_identification_authentication_failures"), default=0.0),
         0.0,
@@ -96,6 +129,7 @@ def build_result(target_path: str) -> dict:
         owasp["A02_cryptographic_failures"] = round(a02_score, 2)
         owasp["A03_injection"] = round(a03_score, 2)
         owasp["A05_security_misconfiguration"] = round(a05_score, 2)
+        owasp["A06_vulnerable_outdated_components"] = round(a06_score, 2)
         owasp["A07_identification_authentication_failures"] = round(a07_score, 2)
         owasp["A08_integrity_failures"] = round(a08_score, 2)
 
