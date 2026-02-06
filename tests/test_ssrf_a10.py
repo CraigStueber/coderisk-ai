@@ -29,18 +29,18 @@ def run_analyzer(file_path: str) -> dict:
 
 
 def test_vulnerable_requests():
-    """Test that ssrf_requests.py is detected."""
+    """Test that a10_ssrf_requests_test.py is detected."""
     print("=" * 70)
     print("TEST 1: Vulnerable SSRF patterns using requests library")
     print("=" * 70)
     
-    data = run_analyzer('examples/ssrf_requests.py')
+    data = run_analyzer('examples/a10_ssrf_requests_test.py')
     
     # Check for A10_ssrf findings
     a10_findings = [f for f in data['findings'] if f.get('category') == 'A10_ssrf']
     
     if not a10_findings:
-        print("❌ FAILED: No SSRF findings detected in ssrf_requests.py")
+        print("❌ FAILED: No SSRF findings detected in a10_ssrf_requests_test.py")
         return False
     
     print(f"✅ Found {len(a10_findings)} SSRF finding(s)")
@@ -69,23 +69,23 @@ def test_vulnerable_requests():
         if count > 5:
             break
     
-    print("✅ PASSED: SSRF patterns detected in ssrf_requests.py")
+    print("✅ PASSED: SSRF patterns detected in a10_ssrf_requests_test.py")
     return True
 
 
 def test_vulnerable_urllib():
-    """Test that ssrf_urllib.py is detected."""
+    """Test that a10_ssrf_urllib_test.py is detected."""
     print("\n" + "=" * 70)
     print("TEST 2: Vulnerable SSRF patterns using urllib library")
     print("=" * 70)
     
-    data = run_analyzer('examples/ssrf_urllib.py')
+    data = run_analyzer('examples/a10_ssrf_urllib_test.py')
     
     # Check for A10_ssrf findings
     a10_findings = [f for f in data['findings'] if f.get('category') == 'A10_ssrf']
     
     if not a10_findings:
-        print("❌ FAILED: No SSRF findings detected in ssrf_urllib.py")
+        print("❌ FAILED: No SSRF findings detected in a10_ssrf_urllib_test.py")
         return False
     
     print(f"✅ Found {len(a10_findings)} SSRF finding(s)")
@@ -106,7 +106,7 @@ def test_vulnerable_urllib():
         if count > 5:
             break
     
-    print("✅ PASSED: SSRF patterns detected in ssrf_urllib.py")
+    print("✅ PASSED: SSRF patterns detected in a10_ssrf_urllib_test.py")
     return True
 
 
@@ -116,13 +116,13 @@ def test_safe_examples():
     print("TEST 3: Safe SSRF patterns (should not be detected)")
     print("=" * 70)
     
-    data = run_analyzer('examples_safe/ssrf_safe.py')
+    data = run_analyzer('examples_safe/a10_ssrf_safe_test.py')
     
     # Check for A10_ssrf findings (should be none)
     a10_findings = [f for f in data['findings'] if f.get('category') == 'A10_ssrf']
     
     if a10_findings:
-        print(f"❌ FAILED: Found {len(a10_findings)} false positive(s) in ssrf_safe.py")
+        print(f"❌ FAILED: Found {len(a10_findings)} false positive(s) in a10_ssrf_safe_test.py")
         
         # Show details of false positives
         print("\n   False positives:")
@@ -143,7 +143,7 @@ def test_finding_format():
     print("TEST 4: Validate finding schema format")
     print("=" * 70)
     
-    data = run_analyzer('examples/ssrf_requests.py')
+    data = run_analyzer('examples/a10_ssrf_requests_test.py')
     a10_findings = [f for f in data['findings'] if f.get('category') == 'A10_ssrf']
     
     if not a10_findings:

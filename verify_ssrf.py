@@ -134,7 +134,7 @@ def main():
     if passed == total:
         print("\n🎉 All quick verification tests passed!")
         print("\nYou can now run:")
-        print("  - python -m coderisk_ai.cli analyze examples/ssrf_requests.py --pretty")
+        print("  - python -m coderisk_ai.cli analyze examples/a10_ssrf_requests_test.py --pretty")
         print("  - python tests/test_ssrf_a10.py")
     else:
         print(f"\n⚠️  {total - passed} test(s) failed")
