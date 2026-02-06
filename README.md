@@ -43,27 +43,71 @@ CodeRisk AI exists to quantify that uncertainty in a way that is:
 
 ### ✔ Deterministic analysis first
 
-CodeRisk AI performs file- and directory-level analysis for **Python code**, detecting security issues aligned to the **OWASP Top 10**.
+CodeRisk AI performs file- and directory-level analysis for **Python code**, detecting security issues across all **OWASP Top 10 2021** categories.
 
-Examples include:
+Coverage includes:
 
 #### **A01 – Broken Access Control**
 
-- Missing authentication decorators
+- Missing authentication decorators (`@login_required`, `@jwt_required`)
 - Disabled or commented-out authorization checks
+- Missing permission validation on sensitive routes
+
+#### **A02 – Cryptographic Failures**
+
+- Hardcoded secrets and credentials
+- Weak hashing algorithms (MD5, SHA1)
+- Insecure random number generation
+- Weak password hashing (plain text, inadequate algorithms)
 
 #### **A03 – Injection**
 
 - SQL query construction via string concatenation or interpolation
+- Unsafe dynamic SQL with user input
+- Missing parameterized queries
+
+#### **A04 – Insecure Design**
+
+- Missing rate limiting on authentication endpoints
+- Lack of authorization checks on admin routes
+- Inadequate input validation patterns
+
+#### **A05 – Security Misconfiguration**
+
+- Debug mode enabled in production
+- Overly permissive CORS configurations
+- Missing security headers
+
+#### **A06 – Vulnerable and Outdated Components**
+
+- Deprecated packages (e.g., `pycrypto`, `python-jose`)
+- Unpinned dependencies with loose version constraints
+- Known vulnerable library versions
+
+#### **A07 – Identification and Authentication Failures**
+
+- Weak password validation patterns
+- Custom authentication without proper libraries
+- Insecure session token generation
+- Hardcoded authentication credentials
 
 #### **A08 – Software and Data Integrity Failures**
 
 - Unsafe deserialization (e.g., `pickle.loads` on untrusted input)
+- Use of `yaml.load()` without SafeLoader
+- Marshal deserialization of untrusted data
 
-#### **A09 – Security Logging & Monitoring Failures**
+#### **A09 – Security Logging and Monitoring Failures**
 
-- Swallowed exceptions
+- Swallowed exceptions without logging
 - Fallback behavior without telemetry
+- Missing security-critical event logging
+
+#### **A10 – Server-Side Request Forgery (SSRF)**
+
+- User-controlled URLs in HTTP requests
+- Missing URL validation and allowlisting
+- Direct use of user input in `requests` or `urllib` calls
 
 Each detector emits **structured findings** with:
 
