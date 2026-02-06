@@ -1,0 +1,43 @@
+# Safe version - Pinned dependencies with exact versions
+# This file demonstrates proper dependency pinning for reproducible builds
+
+# Web frameworks - pinned to exact versions
+flask==3.0.0
+fastapi==0.109.0
+
+# Database drivers - pinned
+psycopg2-binary==2.9.9
+pymongo==4.6.1
+
+# HTTP clients - pinned
+requests==2.31.0
+httpx==0.26.0
+
+# Authentication and security - pinned
+cryptography==42.0.0
+pyjwt==2.8.0
+bcrypt==4.1.2
+passlib==1.7.4
+
+# Data processing - pinned
+pandas==2.1.4
+numpy==1.26.3
+
+# Testing - pinned
+pytest==7.4.4
+pytest-cov==4.1.0
+
+# Code quality - pinned
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+
+# Task queue - pinned
+celery==5.3.6
+redis==5.0.1
+
+# Environment management - pinned
+python-dotenv==1.0.1
+
+# API documentation - pinned
+pydantic==2.5.3

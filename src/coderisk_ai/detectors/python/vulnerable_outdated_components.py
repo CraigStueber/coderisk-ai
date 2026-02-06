@@ -3,6 +3,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+# TOML parsing: prefer tomllib (Python 3.11+) else tomli
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None  # type: ignore
+
 from .detector_utils import deduplicate_findings
 
 
@@ -179,31 +188,170 @@ def _check_pyproject_version(version_spec: str) -> tuple[bool, str]:
     """
     Check if a pyproject.toml version spec is pinned.
     Returns (is_pinned, looseness_description).
+    
+    Poetry uses bare versions like "1.21.0" as exact pins (no ^ or ~ prefix).
     """
     version_spec = version_spec.strip()
     
-    # Wildcard
-    if version_spec == "*":
+    # Empty or wildcard
+    if not version_spec or version_spec == "*":
         return (False, "wildcard (*) allows any version")
     
     # Caret version (^1.2.3) - allows compatible updates
     if version_spec.startswith("^"):
         return (False, "caret (^) allows compatible updates")
     
-    # Tilde version (~1.2.3) - allows patch updates
+    # Tilde version (~1.2.3 or ~=1.2.3) - allows patch updates
     if version_spec.startswith("~"):
         return (False, "tilde (~) allows patch-level updates")
     
-    # Exact version (1.2.3 or =1.2.3)
-    if version_spec.startswith("=") or re.match(r'^\d+\.\d+\.\d+$', version_spec):
+    # Exact version with == operator (PEP 440 style)
+    if version_spec.startswith("=="):
         return (True, "")
     
-    # Other operators (>=, >, etc.)
-    if any(op in version_spec for op in [">=", ">", "<", "!="]):
+    # Check for loose operators before checking bare version
+    if any(op in version_spec for op in [">=", ">", "<", "<=", "!=", "~="]):
         return (False, "loose operator allows multiple versions")
+    
+    # Bare version like "1.2.3" or "1.2.3rc1" - Poetry treats as exact pin
+    # Match: digits, dots, and optional pre-release suffixes (rc, alpha, beta, dev, post)
+    bare_version_pattern = r'^\d+(\.\d+)*([a-zA-Z]+\d*)?$'
+    if re.match(bare_version_pattern, version_spec):
+        return (True, "")
     
     # Default: treat as unpinned if uncertain
     return (False, "version constraint not strictly pinned")
+
+
+def _parse_pyproject_toml(source: str, file_path: str) -> list[tuple[str, str, int]]:
+    """
+    Parse pyproject.toml and extract dependencies with line numbers.
+    Returns list of (package_name, version_spec, line_number) tuples.
+    Supports both PEP 621 and Poetry formats.
+    """
+    if tomllib is None:
+        # TOML library not available, fail closed
+        return []
+    
+    try:
+        data = tomllib.loads(source)
+    except Exception:
+        # TOML parse error, fail closed
+        return []
+    
+    dependencies: list[tuple[str, str, int]] = []
+    lines = source.splitlines()
+    
+    # Helper to find line number for a package in source
+    def find_line_number(package_name: str, section_name: str) -> int:
+        """Find approximate line number where package is defined."""
+        # Look for the package name after the section header
+        in_section = False
+        section_pattern = re.escape(section_name)
+        for idx, line in enumerate(lines, start=1):
+            if re.search(rf'\[{section_pattern}\]', line):
+                in_section = True
+            elif in_section:
+                if line.strip().startswith("["):
+                    # Entered new section
+                    break
+                if package_name.lower() in line.lower():
+                    return idx
+        return 1  # Fallback
+    
+    # PEP 621 format: [project] dependencies
+    if "project" in data:
+        project = data["project"]
+        
+        # [project] dependencies = ["pkg>=1.0", "pkg2==2.0", ...]
+        if "dependencies" in project and isinstance(project["dependencies"], list):
+            for dep_str in project["dependencies"]:
+                if not isinstance(dep_str, str):
+                    continue
+                # Parse requirement string: "package[extras]>=1.0,<2.0"
+                match = _REQ_LINE_PATTERN.match(dep_str)
+                if match:
+                    pkg_name = match.group(1).lower().strip()
+                    version_spec = match.group(2) or ""
+                    line_no = find_line_number(pkg_name, "project")
+                    dependencies.append((pkg_name, version_spec, line_no))
+        
+        # [project.optional-dependencies] section
+        if "optional-dependencies" in project and isinstance(project["optional-dependencies"], dict):
+            for group_name, deps in project["optional-dependencies"].items():
+                if not isinstance(deps, list):
+                    continue
+                for dep_str in deps:
+                    if not isinstance(dep_str, str):
+                        continue
+                    match = _REQ_LINE_PATTERN.match(dep_str)
+                    if match:
+                        pkg_name = match.group(1).lower().strip()
+                        version_spec = match.group(2) or ""
+                        line_no = find_line_number(pkg_name, f"project.optional-dependencies.{group_name}")
+                        dependencies.append((pkg_name, version_spec, line_no))
+    
+    # Poetry format: [tool.poetry.dependencies]
+    if "tool" in data and "poetry" in data["tool"]:
+        poetry = data["tool"]["poetry"]
+        
+        # [tool.poetry.dependencies]
+        if "dependencies" in poetry and isinstance(poetry["dependencies"], dict):
+            for pkg_name, version_data in poetry["dependencies"].items():
+                pkg_lower = pkg_name.lower()
+                # Ignore python version constraint
+                if pkg_lower == "python":
+                    continue
+                
+                # Extract version spec
+                version_spec = ""
+                if isinstance(version_data, str):
+                    version_spec = version_data
+                elif isinstance(version_data, dict) and "version" in version_data:
+                    version_spec = version_data["version"]
+                
+                line_no = find_line_number(pkg_lower, "tool.poetry.dependencies")
+                dependencies.append((pkg_lower, version_spec, line_no))
+        
+        # [tool.poetry.group.<name>.dependencies]
+        if "group" in poetry and isinstance(poetry["group"], dict):
+            for group_name, group_data in poetry["group"].items():
+                if not isinstance(group_data, dict) or "dependencies" not in group_data:
+                    continue
+                if not isinstance(group_data["dependencies"], dict):
+                    continue
+                    
+                for pkg_name, version_data in group_data["dependencies"].items():
+                    pkg_lower = pkg_name.lower()
+                    if pkg_lower == "python":
+                        continue
+                    
+                    version_spec = ""
+                    if isinstance(version_data, str):
+                        version_spec = version_data
+                    elif isinstance(version_data, dict) and "version" in version_data:
+                        version_spec = version_data["version"]
+                    
+                    line_no = find_line_number(pkg_lower, f"tool.poetry.group.{group_name}.dependencies")
+                    dependencies.append((pkg_lower, version_spec, line_no))
+        
+        # [tool.poetry.dev-dependencies] (legacy Poetry format)
+        if "dev-dependencies" in poetry and isinstance(poetry["dev-dependencies"], dict):
+            for pkg_name, version_data in poetry["dev-dependencies"].items():
+                pkg_lower = pkg_name.lower()
+                if pkg_lower == "python":
+                    continue
+                
+                version_spec = ""
+                if isinstance(version_data, str):
+                    version_spec = version_data
+                elif isinstance(version_data, dict) and "version" in version_data:
+                    version_spec = version_data["version"]
+                
+                line_no = find_line_number(pkg_lower, "tool.poetry.dev-dependencies")
+                dependencies.append((pkg_lower, version_spec, line_no))
+    
+    return dependencies
 
 
 def detect_vulnerable_outdated_components(source: str, file_path: str) -> list[dict[str, Any]]:
@@ -216,7 +364,7 @@ def detect_vulnerable_outdated_components(source: str, file_path: str) -> list[d
     
     Supports:
     - requirements.txt style files
-    - pyproject.toml (basic Poetry-style dependencies)
+    - pyproject.toml (PEP 621 and Poetry formats)
     
     Returns schema-shaped finding dicts.
     """
@@ -227,108 +375,118 @@ def detect_vulnerable_outdated_components(source: str, file_path: str) -> list[d
     # Detect file type from path
     file_lower = file_path.lower()
     is_requirements = any(name in file_lower for name in ["requirements", "constraints"])
-    is_pyproject = "pyproject.toml" in file_lower
+    is_pyproject = "pyproject" in file_lower
     
-    # Track if we're in a dependencies section for pyproject.toml
-    in_dependencies_section = False
-    
-    for idx, line in enumerate(lines, start=1):
-        # Skip if we already found something on this line
-        if idx in found_lines:
-            continue
+    # Handle pyproject.toml with proper TOML parsing
+    if is_pyproject:
+        # Use TOML parser to extract dependencies
+        pyproject_deps = _parse_pyproject_toml(source, file_path)
         
-        # Skip empty lines and comments
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        
-        # Handle pyproject.toml sections
-        if is_pyproject:
-            # Check if entering dependencies section
-            if stripped.startswith("[") and "dependencies" in stripped.lower():
-                in_dependencies_section = True
-                continue
-            elif stripped.startswith("["):
-                in_dependencies_section = False
+        for package_name, version_spec, line_no in pyproject_deps:
+            if line_no in found_lines:
                 continue
             
-            # Only process lines in dependencies section
-            if not in_dependencies_section:
-                continue
-            
-            # Parse pyproject.toml dependency line
-            match = _PYPROJECT_DEP_PATTERN.match(line)
-            if match:
-                package_name = match.group(1).lower().strip()
-                version_spec = match.group(2).strip()
+            # Check for deprecated package
+            if package_name in DEPRECATED_PACKAGES:
+                found_lines.add(line_no)
+                dep_info = DEPRECATED_PACKAGES[package_name]
                 
-                # Check for deprecated package
-                if package_name in DEPRECATED_PACKAGES:
-                    found_lines.add(idx)
-                    dep_info = DEPRECATED_PACKAGES[package_name]
-                    
-                    # Store package name in finding for severity adjustment later
-                    finding = _make_finding(
-                        finding_id="A06.DEPENDENCIES.DEPRECATED",
-                        title="Deprecated dependencies detected",  # Generic title
-                        description="One or more dependencies are deprecated or unmaintained.",
+                # Create snippet from line
+                snippet = lines[line_no - 1].strip() if 0 < line_no <= len(lines) else package_name
+                
+                finding = _make_finding(
+                    finding_id="A06.DEPENDENCIES.DEPRECATED",
+                    title="Deprecated dependencies detected",
+                    description="One or more dependencies are deprecated or unmaintained.",
+                    file_path=file_path,
+                    line_no=line_no,
+                    snippet=snippet[:240],
+                    explanation=(
+                        f"{dep_info['reason']}. "
+                        f"Consider migrating to {dep_info['alternative']}."
+                    ),
+                    impact_f=7.5,
+                    exploitability_f=6.5,
+                    confidence_f=dep_info["confidence"],
+                    cwe_refs=["CWE-1104"],
+                    exploit_scenario=(
+                        "Using deprecated packages may expose the application to unpatched "
+                        "vulnerabilities, as they no longer receive security updates."
+                    ),
+                    recommended_fix=(
+                        f"Replace '{package_name}' with {dep_info['alternative']}. "
+                        "Prefer actively maintained libraries with a strong security track record."
+                    ),
+                )
+                finding["_package_name"] = package_name
+                finding["_security_critical"] = dep_info.get("security_critical", _is_security_critical_package(package_name))
+                findings.append(finding)
+                continue
+            
+            # Check for unpinned version
+            is_pinned, loose_desc = _check_pyproject_version(version_spec)
+            if not is_pinned:
+                found_lines.add(line_no)
+                
+                # Create snippet from line
+                snippet = lines[line_no - 1].strip() if 0 < line_no <= len(lines) else f"{package_name} = \"{version_spec}\""
+                
+                findings.append(
+                    _make_finding(
+                        finding_id="A06.DEPENDENCIES.UNPINNED",
+                        title="Unpinned dependencies detected",
+                        description="One or more dependencies have loose or missing version constraints.",
                         file_path=file_path,
-                        line_no=idx,
-                        snippet=line.strip(),
+                        line_no=line_no,
+                        snippet=snippet[:240],
                         explanation=(
-                            f"{dep_info['reason']}. "
-                            f"Consider migrating to {dep_info['alternative']}."
+                            f"The version specifier '{version_spec}' {loose_desc}. "
+                            "This can lead to inconsistent builds and unexpected behavior when "
+                            "newer versions introduce breaking changes or vulnerabilities. "
+                            "Use exact version pinning and lock files for reproducible builds."
                         ),
-                        impact_f=7.5,
-                        exploitability_f=6.5,
-                        confidence_f=dep_info["confidence"],
+                        impact_f=5.5,
+                        exploitability_f=5.0,
+                        confidence_f=0.80,
                         cwe_refs=["CWE-1104"],
                         exploit_scenario=(
-                            "Using deprecated packages may expose the application to unpatched "
-                            "vulnerabilities, as they no longer receive security updates."
+                            "Unpinned dependencies can introduce vulnerabilities or breaking changes "
+                            "when automatic updates pull in compromised or incompatible versions."
                         ),
-                        recommended_fix=f"Replace '{package_name}' with {dep_info['alternative']}.",
+                        recommended_fix=(
+                            f"Pin '{package_name}' to an exact version (e.g., '{package_name} = \"==1.2.3\"') "
+                            "and maintain a lockfile to ensure reproducible builds across environments. "
+                            "Use your dependency manager's lock mechanism to prevent version drift."
+                        ),
                     )
-                    finding["_package_name"] = package_name
-                    finding["_security_critical"] = dep_info.get("security_critical", _is_security_critical_package(package_name))
-                    findings.append(finding)
-                    continue
-                
-                # Check for unpinned version
-                is_pinned, loose_desc = _check_pyproject_version(version_spec)
-                if not is_pinned:
-                    found_lines.add(idx)
-                    findings.append(
-                        _make_finding(
-                            finding_id="A06.DEPENDENCIES.UNPINNED",
-                            title="Unpinned dependencies detected",  # Generic title
-                            description="One or more dependencies have loose or missing version constraints.",
-                            file_path=file_path,
-                            line_no=idx,
-                            snippet=line.strip(),
-                            explanation=(
-                                f"The version specifier '{version_spec}' {loose_desc}. "
-                                "This can lead to inconsistent builds and unexpected behavior when "
-                                "newer versions introduce breaking changes or vulnerabilities. "
-                                "Use exact version pinning and lock files for reproducible builds."
-                            ),
-                            impact_f=5.5,
-                            exploitability_f=5.0,
-                            confidence_f=0.80,
-                            cwe_refs=["CWE-1104"],
-                            exploit_scenario=(
-                                "Unpinned dependencies can introduce vulnerabilities or breaking changes "
-                                "when automatic updates pull in compromised or incompatible versions."
-                            ),
-                            recommended_fix=(
-                                f"Pin '{package_name}' to an exact version (e.g., '{package_name} = \"1.2.3\"') "
-                                "and use poetry.lock or similar lock files to ensure reproducibility."
-                            ),
-                        )
-                    )
+                )
         
-        # Handle requirements.txt style
-        elif is_requirements:
+        # Post-process DEPRECATED findings for pyproject.toml to adjust severity
+        deduplicated = deduplicate_findings(findings)
+        for finding in deduplicated:
+            if finding.get("rule_id") == "A06.DEPENDENCIES.DEPRECATED":
+                has_security_critical = False
+                for instance in finding.get("instances", []):
+                    snippet = instance.get("snippet", "")
+                    if _is_security_critical_package(snippet):
+                        has_security_critical = True
+                        break
+                if has_security_critical and finding.get("severity") == "medium":
+                    finding["severity"] = "high"
+        return deduplicated
+    
+    # Handle requirements.txt style files (original logic)
+    if is_requirements:
+        for idx, line in enumerate(lines, start=1):
+            # Skip if we already found something on this line
+            if idx in found_lines:
+                continue
+            
+            # Skip empty lines and comments
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            
             # Skip editable installs, VCS URLs, local paths
             if stripped.startswith("-e") or stripped.startswith("git+") or stripped.startswith("http"):
                 continue
@@ -366,7 +524,10 @@ def detect_vulnerable_outdated_components(source: str, file_path: str) -> list[d
                             "Using deprecated packages may expose the application to unpatched "
                             "vulnerabilities, as they no longer receive security updates."
                         ),
-                        recommended_fix=f"Replace '{package_name}' with {dep_info['alternative']}.",
+                        recommended_fix=(
+                            f"Replace '{package_name}' with {dep_info['alternative']}. "
+                            "Prefer actively maintained libraries with a strong security track record."
+                        ),
                     )
                     finding["_package_name"] = package_name
                     finding["_security_critical"] = dep_info.get("security_critical", _is_security_critical_package(package_name))
@@ -411,7 +572,8 @@ def detect_vulnerable_outdated_components(source: str, file_path: str) -> list[d
                             ),
                             recommended_fix=(
                                 f"Pin '{package_name}' to an exact version (e.g., '{package_name}==1.2.3') "
-                                "and use a lock file (pip freeze, requirements-lock.txt) to ensure reproducibility."
+                                "and maintain a lockfile to ensure reproducible builds across environments. "
+                                "Use your dependency manager's lock mechanism to prevent version drift."
                             ),
                         )
                     )

@@ -8,7 +8,16 @@ from .detector_utils import deduplicate_findings
 
 _SQL_LINE_HINT = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE)\b", re.IGNORECASE)
 
-# Heuristic patterns (v0.1):
+# SQL structure patterns for stronger detection (v0.2)
+_SQL_SELECT_PATTERN = re.compile(r"\bSELECT\b.*\bFROM\b", re.IGNORECASE)
+_SQL_INSERT_PATTERN = re.compile(r"\bINSERT\b.*\bINTO\b", re.IGNORECASE)
+_SQL_UPDATE_PATTERN = re.compile(r"\bUPDATE\b.*\bSET\b", re.IGNORECASE)
+_SQL_DELETE_PATTERN = re.compile(r"\bDELETE\b.*\bFROM\b", re.IGNORECASE)
+
+# Logging/printing detection to avoid false positives
+_LOGGING_PATTERN = re.compile(r"\b(logger\.|logging\.|print\()", re.IGNORECASE)
+
+# Heuristic patterns (v0.2):
 # 1) "SELECT ..." + user_input
 # 2) f"SELECT ... {var} ..."
 _CONCAT_PATTERN = re.compile(r'(["\']\s*\+\s*\w+|\w+\s*\+\s*["\'])')
@@ -29,15 +38,28 @@ def _severity_from_score(score: float) -> str:
 
 def detect_sql_injection(source: str, file_path: str) -> list[dict[str, Any]]:
     """
-    Very narrow SQL injection heuristic detector (v0.1).
-    - Looks for SQL keywords + string concatenation OR SQL keywords + f-string interpolation.
+    SQL injection heuristic detector (v0.2).
+    - Looks for SQL structure patterns + string interpolation
+    - Filters out logging/printing statements
     - Returns schema-shaped finding dicts.
     """
     findings: list[dict[str, Any]] = []
     lines = source.splitlines()
 
     for idx, line in enumerate(lines, start=1):
-        if not _SQL_LINE_HINT.search(line):
+        # Skip if clearly logging/printing
+        if _LOGGING_PATTERN.search(line):
+            continue
+        
+        # Check if line has SQL structure
+        has_sql_structure = bool(
+            _SQL_SELECT_PATTERN.search(line) or
+            _SQL_INSERT_PATTERN.search(line) or
+            _SQL_UPDATE_PATTERN.search(line) or
+            _SQL_DELETE_PATTERN.search(line)
+        )
+        
+        if not has_sql_structure:
             continue
 
         has_concat = bool(_CONCAT_PATTERN.search(line))

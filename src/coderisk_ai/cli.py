@@ -12,6 +12,8 @@ from coderisk_ai.detectors.python.unsafe_deserialization import detect_unsafe_de
 from coderisk_ai.detectors.python.security_misconfiguration import detect_security_misconfiguration
 from coderisk_ai.detectors.python.identification_authentication_failures import detect_identification_authentication_failures
 from coderisk_ai.detectors.python.vulnerable_outdated_components import detect_vulnerable_outdated_components
+from coderisk_ai.detectors.python.security_logging_monitoring_failures import detect_security_logging_monitoring_failures
+from coderisk_ai.detectors.python.ssrf_a10 import detect_ssrf
 
 
 
@@ -57,6 +59,8 @@ def build_result(target_path: str) -> dict:
             findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
             findings.extend(detect_security_misconfiguration(source=source, file_path=file_path))
             findings.extend(detect_identification_authentication_failures(source=source, file_path=file_path))
+            findings.extend(detect_security_logging_monitoring_failures(source=source, file_path=file_path))
+            findings.extend(detect_ssrf(source=source, file_path=file_path))
 
     if p.is_file():
         file_count = 1
@@ -87,7 +91,7 @@ def build_result(target_path: str) -> dict:
         if sev in sev_counts:
             sev_counts[sev] += 1
 
-    # OWASP rollup (v0.1: A01 + A02 + A03 + A05 + A06 + A07 + A08)
+    # OWASP rollup (v0.1: A01 + A02 + A03 + A05 + A06 + A07 + A08 + A09)
     a01_score = clamp(
         max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A01_access_control"), default=0.0),
         0.0,
@@ -123,6 +127,16 @@ def build_result(target_path: str) -> dict:
         0.0,
         10.0,
     )
+    a09_score = clamp(
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A09_security_logging_monitoring_failures"), default=0.0),
+        0.0,
+        10.0,
+    )
+    a10_score = clamp(
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A10_ssrf"), default=0.0),
+        0.0,
+        10.0,
+    )
     owasp = {}
     if findings:
         owasp["A01_access_control"] = round(a01_score, 2)
@@ -132,6 +146,8 @@ def build_result(target_path: str) -> dict:
         owasp["A06_vulnerable_outdated_components"] = round(a06_score, 2)
         owasp["A07_identification_authentication_failures"] = round(a07_score, 2)
         owasp["A08_integrity_failures"] = round(a08_score, 2)
+        owasp["A09_security_logging_monitoring_failures"] = round(a09_score, 2)
+        owasp["A10_ssrf"] = round(a10_score, 2)
 
     # CVSS-like quick rollup (simple placeholder)
     # If we have any A03 finding, assume higher impact/exploitability.

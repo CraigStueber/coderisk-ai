@@ -7,6 +7,34 @@ from __future__ import annotations
 from typing import Any
 
 
+# Severity levels for aggregation (lower index = lower severity)
+_SEVERITY_LEVELS = ["info", "low", "medium", "high", "critical"]
+
+
+def _max_severity(severities: list[str]) -> str:
+    """
+    Return the maximum severity from a list of severity strings.
+    
+    Args:
+        severities: List of severity strings (info, low, medium, high, critical)
+        
+    Returns:
+        The highest severity level
+    """
+    if not severities:
+        return "info"
+    
+    max_level = 0
+    for sev in severities:
+        sev_lower = sev.lower()
+        if sev_lower in _SEVERITY_LEVELS:
+            level = _SEVERITY_LEVELS.index(sev_lower)
+            if level > max_level:
+                max_level = level
+    
+    return _SEVERITY_LEVELS[max_level]
+
+
 def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Deduplicate findings by grouping instances of the same rule in the same file.
@@ -23,8 +51,8 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     
     for finding in findings:
-        # Use id as rule_id (for now they're the same)
-        rule_id = finding["id"]
+        # Use rule_id if present, otherwise fall back to id
+        rule_id = finding.get("rule_id", finding["id"])
         file_path = finding["evidence"]["file"]
         key = (rule_id, file_path)
         
@@ -42,6 +70,7 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
         instances = []
         algorithms = set()  # Track unique algorithms for title enhancement
         instance_confidences = []
+        instance_severities = []  # Track per-instance severities for aggregation
         
         for f in group:
             ev = f["evidence"]
@@ -62,11 +91,20 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
                 instance_confidences.append(f["_instance_confidence"])
             else:
                 instance_confidences.append(f["confidence"])
+            # Track per-instance severity for aggregation
+            if "_instance_severity" in f:
+                instance_severities.append(f["_instance_severity"])
+            else:
+                instance_severities.append(f["severity"])
             instances.append(instance)
         
         # Calculate finding-level confidence as max of instance confidences
         # Rationale: Finding confidence reflects the strongest supported instance
         finding_confidence = max(instance_confidences) if instance_confidences else first["confidence"]
+        
+        # Calculate finding-level severity as max of instance severities
+        # Rationale: Finding severity reflects the most severe instance
+        finding_severity = _max_severity(instance_severities) if instance_severities else first["severity"]
         
         # Enhance title with algorithm list if multiple algorithms detected
         title = first["title"]
@@ -77,7 +115,13 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
         
         # Build deduplicated finding
         # Generate unique ID: rule_id:file:first_line
-        unique_id = f"{rule_id}:{file_path}:{instances[0]['line_start']}"
+        # But if the first finding already has a properly formatted unique id, use it
+        if "rule_id" in first and "id" in first and first["id"] != first["rule_id"]:
+            # Detector already set both rule_id and unique id properly
+            unique_id = first["id"]
+        else:
+            # Legacy: generate unique id from rule_id
+            unique_id = f"{rule_id}:{file_path}:{instances[0]['line_start']}"
         
         rule_score = first.get("rule_score", first.get("score_contribution", 0.0))
         result = {
@@ -86,7 +130,7 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
             "title": title,
             "description": first["description"],
             "category": first["category"],
-            "severity": first["severity"],
+            "severity": finding_severity,
             "rule_score": rule_score,
             "score_contribution": rule_score,  # Deprecated: backward compatibility only (remove in v0.2)
             "confidence": finding_confidence,

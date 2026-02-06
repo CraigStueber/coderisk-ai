@@ -5,6 +5,8 @@ from .unsafe_deserialization import detect_unsafe_deserialization
 from .security_misconfiguration import detect_security_misconfiguration
 from .identification_authentication_failures import detect_identification_authentication_failures
 from .vulnerable_outdated_components import detect_vulnerable_outdated_components
+from .security_logging_monitoring_failures import detect_security_logging_monitoring_failures
+from .ssrf_a10 import detect_ssrf
 
 __all__ = [
     "detect_broken_access_control",
@@ -14,4 +16,6 @@ __all__ = [
     "detect_security_misconfiguration",
     "detect_identification_authentication_failures",
     "detect_vulnerable_outdated_components",
+    "detect_security_logging_monitoring_failures",
+    "detect_ssrf",
 ]
