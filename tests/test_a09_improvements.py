@@ -26,7 +26,7 @@ def test_sql_injection_no_false_positive():
     print("TEST 1: SQL Injection False Positive Fix")
     print("=" * 70)
     
-    data = run_analyzer('examples/security_logging_monitoring_failures.py')
+    data = run_analyzer('examples/a09_security_logging_monitoring_failures_test.py')
     
     # Check for SQL injection findings
     sql_findings = [f for f in data.get('findings', [])
@@ -64,7 +64,7 @@ def test_security_critical_escalation():
     print("TEST 2: Security-Critical Severity Escalation to High")
     print("=" * 70)
     
-    data = run_analyzer('examples/security_logging_monitoring_failures.py')
+    data = run_analyzer('examples/a09_security_logging_monitoring_failures_test.py')
     
     # Find JWT/auth/decrypt-related A09 findings
     a09_findings = [f for f in data.get('findings', [])
@@ -122,7 +122,7 @@ def test_cache_key_no_escalation():
     print("TEST 3: Cache Key Does Not Over-Trigger")
     print("=" * 70)
     
-    data = run_analyzer('examples/security_logging_monitoring_failures.py')
+    data = run_analyzer('examples/a09_security_logging_monitoring_failures_test.py')
     
     # Find the cache_key example (example 17)
     a09_findings = [f for f in data.get('findings', [])
@@ -170,7 +170,7 @@ def test_best_effort_handling():
     print("TEST 4: Best-Effort Context Detection")
     print("=" * 70)
     
-    data = run_analyzer('examples/security_logging_monitoring_failures.py')
+    data = run_analyzer('examples/a09_security_logging_monitoring_failures_test.py')
     
     # Find cache-related findings with best-effort comments
     best_effort_findings = []
@@ -197,7 +197,7 @@ def test_no_cli_language_in_fixes():
     print("TEST 5: No CLI Language in Recommended Fixes")
     print("=" * 70)
     
-    data = run_analyzer('examples/security_logging_monitoring_failures.py')
+    data = run_analyzer('examples/a09_security_logging_monitoring_failures_test.py')
     
     cli_keywords = ['run', 'command', 'execute', 'shell', '$', 'pip install', 'apt-get']
     findings_with_cli = []

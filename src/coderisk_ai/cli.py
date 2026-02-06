@@ -5,15 +5,16 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from coderisk_ai.detectors.python.broken_access_control import detect_broken_access_control
-from coderisk_ai.detectors.python.cryptographic_failures import detect_cryptographic_failures
-from coderisk_ai.detectors.python.sql_injection import detect_sql_injection
-from coderisk_ai.detectors.python.unsafe_deserialization import detect_unsafe_deserialization
-from coderisk_ai.detectors.python.security_misconfiguration import detect_security_misconfiguration
-from coderisk_ai.detectors.python.identification_authentication_failures import detect_identification_authentication_failures
-from coderisk_ai.detectors.python.vulnerable_outdated_components import detect_vulnerable_outdated_components
-from coderisk_ai.detectors.python.security_logging_monitoring_failures import detect_security_logging_monitoring_failures
-from coderisk_ai.detectors.python.ssrf_a10 import detect_ssrf
+from coderisk_ai.detectors.python.a01_broken_access_control import detect_broken_access_control
+from coderisk_ai.detectors.python.a02_cryptographic_failures import detect_cryptographic_failures
+from coderisk_ai.detectors.python.a03_sql_injection import detect_sql_injection
+from coderisk_ai.detectors.python.a08_unsafe_deserialization import detect_unsafe_deserialization
+from coderisk_ai.detectors.python.a05_security_misconfiguration import detect_security_misconfiguration
+from coderisk_ai.detectors.python.a07_identification_authentication_failures import detect_identification_authentication_failures
+from coderisk_ai.detectors.python.a06_vulnerable_outdated_components import detect_vulnerable_outdated_components
+from coderisk_ai.detectors.python.a09_security_logging_monitoring_failures import detect_security_logging_monitoring_failures
+from coderisk_ai.detectors.python.a10_ssrf import detect_ssrf
+from coderisk_ai.detectors.python.a04_insecure_design import detect_insecure_design
 
 
 
@@ -57,6 +58,7 @@ def build_result(target_path: str) -> dict:
             findings.extend(detect_cryptographic_failures(source=source, file_path=file_path))
             findings.extend(detect_sql_injection(source=source, file_path=file_path))
             findings.extend(detect_unsafe_deserialization(source=source, file_path=file_path))
+            findings.extend(detect_insecure_design(source=source, file_path=file_path))
             findings.extend(detect_security_misconfiguration(source=source, file_path=file_path))
             findings.extend(detect_identification_authentication_failures(source=source, file_path=file_path))
             findings.extend(detect_security_logging_monitoring_failures(source=source, file_path=file_path))
@@ -107,6 +109,11 @@ def build_result(target_path: str) -> dict:
         0.0,
         10.0,
     )
+    a04_score = clamp(
+        max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A04_insecure_design"), default=0.0),
+        0.0,
+        10.0,
+    )
     a05_score = clamp(
         max((f.get("rule_score", 0.0) for f in findings if f.get("category") == "A05_security_misconfiguration"), default=0.0),
         0.0,
@@ -142,6 +149,7 @@ def build_result(target_path: str) -> dict:
         owasp["A01_access_control"] = round(a01_score, 2)
         owasp["A02_cryptographic_failures"] = round(a02_score, 2)
         owasp["A03_injection"] = round(a03_score, 2)
+        owasp["A04_insecure_design"] = round(a04_score, 2)
         owasp["A05_security_misconfiguration"] = round(a05_score, 2)
         owasp["A06_vulnerable_outdated_components"] = round(a06_score, 2)
         owasp["A07_identification_authentication_failures"] = round(a07_score, 2)
@@ -173,7 +181,13 @@ def build_result(target_path: str) -> dict:
         "nondeterminism_sensitivity": {"level": "low", "rationale": "v0.1 stub"},
         "dependency_volatility": {"level": "low"},
     }
-
+    # Determine corpus intent based on target path
+    metadata = {}
+    target_lower = target_path.lower().replace("\\", "/")
+    if "examples_safe" in target_lower or "examples-safe" in target_lower:
+        metadata["corpus_intent"] = "hardened_reference_implementations"
+    elif "examples" in target_lower:
+        metadata["corpus_intent"] = "intentional_vulnerability_examples"
     return {
         "schema_version": "0.1",
         "analyzer": {
@@ -198,7 +212,7 @@ def build_result(target_path: str) -> dict:
         },
         "signals": signals,
         "findings": findings,
-        "metadata": {},
+        "metadata": metadata,
     }
 
 

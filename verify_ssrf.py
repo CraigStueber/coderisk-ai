@@ -3,7 +3,7 @@
 Quick manual verification of SSRF detector.
 This script directly imports and tests the detector without using the CLI.
 """
-from coderisk_ai.detectors.python.ssrf_a10 import detect_ssrf
+from coderisk_ai.detectors.python.a10_ssrf import detect_ssrf
 
 
 # Test 1: Vulnerable code with requests

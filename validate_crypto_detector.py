@@ -4,7 +4,7 @@ Quick validation script for cryptographic failures detector.
 Tests that the detector returns findings for vulnerable code and none for safe code.
 """
 
-from coderisk_ai.detectors.python.cryptographic_failures import detect_cryptographic_failures
+from coderisk_ai.detectors.python.a02_cryptographic_failures import detect_cryptographic_failures
 
 
 # Test 1: Vulnerable code - should detect issues

@@ -83,7 +83,7 @@ def main():
     # Run the analyzer
     result = subprocess.run(
         ["python", "-m", "coderisk_ai.cli", "analyze",
-         "examples/identification_authentication_failures_test.py"],
+         "examples/a07_identification_authentication_failures_test.py"],
         capture_output=True,
         text=True
     )

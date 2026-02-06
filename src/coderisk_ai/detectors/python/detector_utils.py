@@ -4,6 +4,7 @@ Provides finding deduplication and formatting utilities.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 
@@ -35,6 +36,53 @@ def _max_severity(severities: list[str]) -> str:
     return _SEVERITY_LEVELS[max_level]
 
 
+def _normalize_path(file_path: str) -> str:
+    """Normalize file path for consistent hashing."""
+    # Replace backslashes, remove leading ./ or absolute prefixes
+    normalized = file_path.replace("\\", "/")
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    # Remove drive letters (Windows)
+    if len(normalized) > 2 and normalized[1] == ":":
+        normalized = normalized[2:].lstrip("/")
+    return normalized
+
+
+def _generate_finding_id(rule_id: str, file_path: str, snippet: str, 
+                         line_start: int, ruleset_version: str = "0.1",
+                         sink_info: str = "", taint_source_info: str = "") -> str:
+    """Generate deterministic hash-based finding ID.
+    
+    Args:
+        rule_id: The rule identifier
+        file_path: File path (will be normalized)
+        snippet: Code snippet
+        line_start: Starting line number
+        ruleset_version: Analyzer ruleset version
+        sink_info: Optional sink information
+        taint_source_info: Optional taint source information
+        
+    Returns:
+        Finding ID in format "fnd_<12hex>"
+    """
+    normalized_path = _normalize_path(file_path)
+    
+    # Build hash input from components
+    hash_input = "|".join([
+        rule_id,
+        normalized_path,
+        str(line_start),
+        snippet[:200],  # Limit snippet length for stability
+        sink_info,
+        taint_source_info,
+        ruleset_version,
+    ])
+    
+    # Generate SHA256 hash and take first 12 hex chars
+    hash_digest = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()[:12]
+    return f"fnd_{hash_digest}"
+
+
 def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Deduplicate findings by grouping instances of the same rule in the same file.
@@ -52,7 +100,10 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
     
     for finding in findings:
         # Use rule_id if present, otherwise fall back to id
-        rule_id = finding.get("rule_id", finding["id"])
+        # If neither exists, skip this finding (malformed)
+        rule_id = finding.get("rule_id") or finding.get("id")
+        if not rule_id:
+            continue  # Skip malformed findings
         file_path = finding["evidence"]["file"]
         key = (rule_id, file_path)
         
@@ -71,6 +122,8 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
         algorithms = set()  # Track unique algorithms for title enhancement
         instance_confidences = []
         instance_severities = []  # Track per-instance severities for aggregation
+        all_sink_functions = set()  # Track unique sink functions
+        all_taint_sources = []  # Track all taint sources (will deduplicate by path)
         
         for f in group:
             ev = f["evidence"]
@@ -96,6 +149,18 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
                 instance_severities.append(f["_instance_severity"])
             else:
                 instance_severities.append(f["severity"])
+            
+            # Track per-instance sink if present
+            if "sink" in f:
+                instance["sink"] = f["sink"]
+                if "function" in f["sink"]:
+                    all_sink_functions.add(f["sink"]["function"])
+            
+            # Track per-instance taint_sources if present
+            if "taint_sources" in f:
+                instance["taint_sources"] = f["taint_sources"]
+                all_taint_sources.extend(f["taint_sources"])
+            
             instances.append(instance)
         
         # Calculate finding-level confidence as max of instance confidences
@@ -114,31 +179,68 @@ def deduplicate_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
                 title = title.replace("detected", f"detected ({algo_list})")
         
         # Build deduplicated finding
-        # Generate unique ID: rule_id:file:first_line
-        # But if the first finding already has a properly formatted unique id, use it
-        if "rule_id" in first and "id" in first and first["id"] != first["rule_id"]:
-            # Detector already set both rule_id and unique id properly
-            unique_id = first["id"]
-        else:
-            # Legacy: generate unique id from rule_id
-            unique_id = f"{rule_id}:{file_path}:{instances[0]['line_start']}"
+        # Generate deterministic hash-based ID
+        sink_info = first.get("sink", {}).get("function", "")
+        taint_source_info = ""
+        if "taint_sources" in first and first["taint_sources"]:
+            taint_source_info = first["taint_sources"][0].get("type", "")
+        
+        finding_id = _generate_finding_id(
+            rule_id=rule_id,
+            file_path=file_path,
+            snippet=instances[0]["snippet"],
+            line_start=instances[0]["line_start"],
+            ruleset_version="0.1",
+            sink_info=sink_info,
+            taint_source_info=taint_source_info,
+        )
+        
+        # Generate human-readable fingerprint
+        fingerprint = f"{rule_id}:{file_path}:{instances[0]['line_start']}"
         
         rule_score = first.get("rule_score", first.get("score_contribution", 0.0))
         result = {
             "rule_id": rule_id,
-            "id": unique_id,
+            "id": finding_id,
+            "fingerprint": fingerprint,
             "title": title,
             "description": first["description"],
             "category": first["category"],
             "severity": finding_severity,
             "rule_score": rule_score,
-            "score_contribution": rule_score,  # Deprecated: backward compatibility only (remove in v0.2)
             "confidence": finding_confidence,
             "exploit_scenario": first.get("exploit_scenario", ""),
             "recommended_fix": first.get("recommended_fix", ""),
             "instances": instances,
             "references": first["references"],
         }
+        
+        # Add optional structured fields if present
+        # Handle sink aggregation: if multiple unique sinks, use "functions" (plural)
+        if all_sink_functions:
+            if len(all_sink_functions) == 1:
+                result["sink"] = {
+                    "type": first.get("sink", {}).get("type", "http_request"),
+                    "function": list(all_sink_functions)[0],
+                }
+            else:
+                result["sink"] = {
+                    "type": first.get("sink", {}).get("type", "http_request"),
+                    "functions": sorted(all_sink_functions),
+                }
+        
+        # Handle taint_sources aggregation: deduplicate by path
+        if all_taint_sources:
+            seen_paths = set()
+            unique_taint_sources = []
+            for ts in all_taint_sources:
+                path = ts.get("path", "")
+                if path and path not in seen_paths:
+                    seen_paths.add(path)
+                    unique_taint_sources.append(ts)
+                elif not path:  # Include sources without paths
+                    unique_taint_sources.append(ts)
+            result["taint_sources"] = unique_taint_sources
         
         deduplicated.append(result)
     

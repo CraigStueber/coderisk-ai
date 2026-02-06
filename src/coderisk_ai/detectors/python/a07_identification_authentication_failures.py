@@ -20,6 +20,18 @@ _AUTH_CONTEXT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Registration/signup context indicators (for password policy)
+_SIGNUP_CONTEXT_PATTERN = re.compile(
+    r'\b(register|signup|sign_up|create_user|create_account|set_password|validate_password|password_strength|password_policy|new_user|registration)\b',
+    re.IGNORECASE,
+)
+
+# Stored credential indicators (suggests auth verification, not policy)
+_STORED_CREDENTIAL_PATTERN = re.compile(
+    r'\b(stored_password|password_hash|user\.password|verify|check_password|bcrypt|argon2|passlib|compare_digest|hash|salt|hashed)\b',
+    re.IGNORECASE,
+)
+
 # Established auth library indicators (to exclude from detection)
 _ESTABLISHED_AUTH_LIBS = re.compile(
     r'\b(bcrypt|passlib|hashlib\.pbkdf2_hmac|check_password_hash|verify_password|'
@@ -30,9 +42,12 @@ _ESTABLISHED_AUTH_LIBS = re.compile(
 
 # Direct password comparison patterns (==, !=)
 _PLAINTEXT_COMPARE_PATTERN = re.compile(
-    r'\b\w+\s*(==|!=)\s*["\'][\w@!#$%^&*()_+\-=\[\]{};\':",.<>/?]{4,}["\']|'  # Compare to literal
-    r'\b(password|passwd|pwd|pass|secret|credential|auth_token|api_key)\w*\s*(==|!=)\s*\w+|'  # password var compared
-    r'\w+\s*(==|!=)\s*\w*\.?(password|passwd|pwd|pass|secret|credential)',  # compared to password attr
+    # Password variable compared to string literal
+    r'\b(password|passwd|pwd|pass|secret|credential|auth_token|api_key)\w*\s*(==|!=)\s*["\'][\w@!#$%^&*()_+\-=\[\]{};\':",.<>/?]{2,}["\']|'
+    # Password variable compared to another variable
+    r'\b(password|passwd|pwd|pass|secret|credential|auth_token|api_key)\w*\s*(==|!=)\s*\w+|'
+    # Variable compared to password attribute
+    r'\w+\s*(==|!=)\s*\w*\.?(password|passwd|pwd|pass|secret|credential)',
     re.IGNORECASE,
 )
 
@@ -76,8 +91,7 @@ def _make_finding(
     
     Scoring semantics (v0.1):
     - rule_score: canonical base score for this rule instance (impact * exploitability * confidence)
-    - score_contribution: post-weight score for aggregation (currently == rule_score for v0.1)
-    - Future (v0.2+): score_contribution may apply additional context/weighting multipliers
+    - Used in max_category model: overall_score = max(category_scores)
     """
     base_score_f = (impact_f * exploitability_f) / 10.0
     rule_score_f = round(base_score_f * confidence_f, 2)
@@ -135,10 +149,85 @@ def _uses_established_auth_lib(lines: list[str], line_idx: int, window: int = 15
     return False
 
 
-def _is_custom_password_check(line: str, lines: list[str], line_idx: int) -> tuple[bool, float, str]:
+def _is_in_signup_context(lines: list[str], line_idx: int, window: int = 15) -> bool:
     """
-    Detect custom password checking logic.
-    Returns: (is_custom_check, confidence, explanation)
+    Check if the line is within a registration/signup context.
+    Looks at function names and nearby code within a window.
+    """
+    start = max(0, line_idx - window)
+    end = min(len(lines), line_idx + window)
+    
+    for i in range(start, end):
+        if _SIGNUP_CONTEXT_PATTERN.search(lines[i]):
+            return True
+    return False
+
+
+def _has_stored_credential_indicators(lines: list[str], line_idx: int, window: int = 10) -> bool:
+    """
+    Check if there are stored credential indicators nearby.
+    This suggests auth verification rather than password policy.
+    """
+    start = max(0, line_idx - window)
+    end = min(len(lines), line_idx + window)
+    
+    for i in range(start, end):
+        if _STORED_CREDENTIAL_PATTERN.search(lines[i]):
+            return True
+    return False
+
+
+def _is_password_policy_check(line: str, lines: list[str], line_idx: int) -> tuple[bool, float, str]:
+    """
+    Detect password policy/strength validation (typically at signup/registration).
+    Returns: (is_policy_check, confidence, explanation)
+    """
+    # Skip if using established auth libraries
+    if _ESTABLISHED_AUTH_LIBS.search(line):
+        return False, 0.0, ""
+    
+    # Check for manual password validation patterns (length, upper/lower/digit checks)
+    manual_check_pattern = re.compile(
+        r'\b(len\s*\(\s*\w*password\w*\s*\)|'
+        r'password\w*\.(?:upper|lower|isdigit|isalpha|isupper|islower)|'
+        r'any\s*\(.*[cC]\.(isupper|islower|isdigit).*password|'
+        r'any\s*\(.*password.*[cC]\.(isupper|islower|isdigit)|'
+        r'all\s*\(.*password)',
+        re.IGNORECASE
+    )
+    
+    if manual_check_pattern.search(line):
+        # Check context to determine if this is password policy or auth verification
+        in_signup = _is_in_signup_context(lines, line_idx)
+        has_stored_cred = _has_stored_credential_indicators(lines, line_idx)
+        in_auth = _is_in_auth_context(lines, line_idx)
+        
+        # If in signup context and no stored credentials, likely password policy
+        if in_signup and not has_stored_cred:
+            confidence = 0.60
+            explanation = (
+                "Password policy validation detected (length, character type checks). "
+                "This appears to be password strength validation at registration. "
+                "Ensure this is paired with proper password hashing and does not replace secure authentication."
+            )
+            return True, confidence, explanation
+        
+        # If NOT in auth context and no stored credentials, likely password policy
+        if not in_auth and not has_stored_cred:
+            confidence = 0.55
+            explanation = (
+                "Password validation detected. This appears to be password strength checking. "
+                "Verify this is used for policy enforcement at registration and not for authentication."
+            )
+            return True, confidence, explanation
+    
+    return False, 0.0, ""
+
+
+def _is_custom_auth_verification(line: str, lines: list[str], line_idx: int) -> tuple[bool, float, str]:
+    """
+    Detect custom authentication/verification logic.
+    Returns: (is_custom_auth, confidence, explanation)
     """
     # Skip if using established auth libraries
     if _ESTABLISHED_AUTH_LIBS.search(line):
@@ -146,16 +235,19 @@ def _is_custom_password_check(line: str, lines: list[str], line_idx: int) -> tup
     
     # Check for direct password comparison in conditionals
     if re.search(r'\bif\b.*\b(password|passwd|pwd|pass)\w*\s*(==|!=)', line, re.IGNORECASE):
-        # Higher confidence if in auth context
+        # Higher confidence if in auth context or has stored credentials
         in_auth = _is_in_auth_context(lines, line_idx)
-        confidence = 0.75 if in_auth else 0.65
-        explanation = (
-            "Custom password comparison detected in conditional logic. "
-            "This pattern suggests homegrown authentication rather than using vetted frameworks."
-        )
-        return True, confidence, explanation
+        has_stored_cred = _has_stored_credential_indicators(lines, line_idx)
+        
+        if in_auth or has_stored_cred:
+            confidence = 0.75
+            explanation = (
+                "Custom password comparison detected in authentication context. "
+                "This pattern suggests homegrown authentication rather than using vetted frameworks."
+            )
+            return True, confidence, explanation
     
-    # Check for manual password validation patterns
+    # Check for manual password validation in auth context
     manual_check_pattern = re.compile(
         r'\b(len\s*\(\s*\w*password\w*\s*\)|'
         r'password\w*\.(?:upper|lower|isdigit|isalpha)|'
@@ -165,24 +257,15 @@ def _is_custom_password_check(line: str, lines: list[str], line_idx: int) -> tup
     )
     
     if manual_check_pattern.search(line):
-        # Check if this is in a login/auth context (higher risk)
-        # or just input validation at signup (lower risk)
         in_auth = _is_in_auth_context(lines, line_idx)
+        has_stored_cred = _has_stored_credential_indicators(lines, line_idx)
         
-        if in_auth:
+        # Only flag as custom auth if in auth context or has stored credentials
+        if in_auth or has_stored_cred:
             confidence = 0.70
             explanation = (
                 "Manual password validation in authentication context. "
                 "Custom password checks may bypass security best practices."
-            )
-            return True, confidence, explanation
-        else:
-            # Likely just input validation for password strength at signup
-            # Still worth flagging but with lower confidence
-            confidence = 0.50
-            explanation = (
-                "Manual password validation detected. While this may be legitimate password strength "
-                "checking at signup, ensure it doesn't replace proper authentication mechanisms."
             )
             return True, confidence, explanation
     
@@ -217,8 +300,8 @@ def _is_plaintext_password_compare(line: str, lines: list[str], line_idx: int) -
         var_name = hardcoded_match.group(1)
         password_value = hardcoded_match.group(3)
         
-        # Check if variable name suggests password
-        if _PASSWORD_VAR_PATTERN.search(var_name) or len(password_value) >= 6:
+        # Check if variable name suggests password (require password-related name)
+        if _PASSWORD_VAR_PATTERN.search(var_name):
             confidence = 0.85
             explanation = (
                 "Direct comparison of password to hardcoded plaintext string. "
@@ -370,37 +453,95 @@ def detect_identification_authentication_failures(source: str, file_path: str) -
             )
             continue  # Skip custom password check for this line
 
-        # Check for custom password checks (only if not already detected as plaintext)
-        is_custom, custom_confidence, custom_explanation = _is_custom_password_check(
+        # Check for password policy validation FIRST (lower severity, info-level)
+        # This takes precedence over custom auth to avoid double-firing
+        is_policy, policy_confidence, policy_explanation = _is_password_policy_check(
             line, lines, idx - 1  # idx is 1-based, list is 0-based
         )
         
-        if is_custom:
+        if is_policy:
             found_lines.add(idx)
             
-            # Mark for potential filtering if overlaps with higher-precedence rule
-            # Store a flag so we can filter during deduplication
+            # Skip if already covered by higher-precedence rule (plaintext)
             _is_overlapped = False
             for (range_start, range_end), claiming_rule in covered_ranges.items():
                 if range_start <= idx <= range_end:
                     _is_overlapped = True
                     break
             
-            # Skip if already covered by a higher-precedence rule
             if _is_overlapped:
                 continue
             
-            # Determine impact based on context
-            in_auth = _is_in_auth_context(lines, idx - 1)
-            impact_f = 8.5 if in_auth else 7.0
-            exploitability_f = 7.5 if in_auth else 6.0
+            # Mark this line as covered by password policy check
+            covered_ranges[(idx, idx)] = "AUTH.PASSWORD_POLICY.CHECK"
+            
+            # Info-level severity for password policy checks
+            impact_f = 3.0
+            exploitability_f = 2.0
             
             findings.append(
                 _make_finding(
-                    finding_id="AUTH.CUSTOM.PASSWORD_CHECK",
-                    title="Custom password checking logic detected",
+                    finding_id="AUTH.PASSWORD_POLICY.CHECK",
+                    title="Password policy validation detected",
                     description=(
-                        "Homegrown password validation or authentication logic detected. "
+                        "Password strength validation detected (length, character type requirements). "
+                        "This is typically used at signup/registration to enforce strong passwords. "
+                        "Ensure this is paired with proper password hashing (bcrypt, argon2) and secure "
+                        "verification, and is not used as a substitute for proper authentication."
+                    ),
+                    file_path=file_path,
+                    line_no=idx,
+                    snippet=line.strip(),
+                    explanation=policy_explanation,
+                    impact_f=impact_f,
+                    exploitability_f=exploitability_f,
+                    confidence_f=policy_confidence,
+                    cwe_refs=["CWE-521"],
+                    exploit_scenario=(
+                        "If password policy checks are used in place of proper authentication "
+                        "or are bypassed, attackers may be able to register accounts with weak "
+                        "passwords susceptible to brute-force or dictionary attacks."
+                    ),
+                    recommended_fix=(
+                        "Ensure password policy validation is used at registration/password change only, "
+                        "paired with secure password hashing (bcrypt, argon2, scrypt via passlib). "
+                        "Never use policy checks for authentication; use proper verify methods instead."
+                    ),
+                )
+            )
+            continue
+        
+        # Check for custom auth verification (only if not already detected as plaintext or policy)
+        is_custom_auth, custom_confidence, custom_explanation = _is_custom_auth_verification(
+            line, lines, idx - 1
+        )
+        
+        if is_custom_auth:
+            found_lines.add(idx)
+            
+            # Skip if already covered by higher-precedence rule
+            _is_overlapped = False
+            for (range_start, range_end), claiming_rule in covered_ranges.items():
+                if range_start <= idx <= range_end:
+                    _is_overlapped = True
+                    break
+            
+            if _is_overlapped:
+                continue
+            
+            # Mark as covered by custom auth verification
+            covered_ranges[(idx, idx)] = "AUTH.CUSTOM.AUTH_VERIFICATION"
+            
+            # Medium-high severity for custom auth verification
+            impact_f = 8.5
+            exploitability_f = 7.5
+            
+            findings.append(
+                _make_finding(
+                    finding_id="AUTH.CUSTOM.AUTH_VERIFICATION",
+                    title="Custom authentication verification logic detected",
+                    description=(
+                        "Homegrown password verification or authentication logic detected. "
                         "Custom authentication implementations often lack security best practices "
                         "such as proper hashing, salting, and constant-time comparison."
                     ),
@@ -411,16 +552,17 @@ def detect_identification_authentication_failures(source: str, file_path: str) -
                     impact_f=impact_f,
                     exploitability_f=exploitability_f,
                     confidence_f=custom_confidence,
-                    cwe_refs=["CWE-287", "CWE-257"],
+                    cwe_refs=["CWE-287", "CWE-328"],
                     exploit_scenario=(
                         "An attacker could exploit weaknesses in custom authentication logic to bypass "
                         "authentication checks, perform timing attacks to enumerate valid credentials, "
                         "or leverage missing security controls like rate limiting and account lockout."
                     ),
                     recommended_fix=(
-                        "Replace custom password validation with a vetted authentication library such as "
-                        "bcrypt via passlib, Django's authentication system, Flask-Login, or similar "
-                        "frameworks that implement security best practices."
+                        "Replace custom authentication logic with vetted libraries such as "
+                        "bcrypt or argon2 via passlib, Django's authentication system, Flask-Login, "
+                        "or similar frameworks that implement security best practices including "
+                        "proper hashing, salting, and constant-time comparison."
                     ),
                 )
             )

@@ -2,9 +2,12 @@
 Safe examples for SSRF - using constant URLs and proper validation.
 These should NOT be flagged by the A10 SSRF detector.
 """
+import logging
 import requests
 import urllib.request
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 
 # Safe Example 1: Constant URL (no user input)
@@ -133,7 +136,8 @@ def fetch_indirect_constant():
         response = requests.get(api_endpoint)
         return response.json()
     except Exception:
-        response = requests.get(backup_endpoint)
+        logger.warning("Primary endpoint failed; using backup", exc_info=True)
+        response = requests.get(backup_endpoint, timeout=5)
         return response.json()
 
 

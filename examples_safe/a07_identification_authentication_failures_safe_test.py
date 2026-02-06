@@ -24,11 +24,20 @@ def hash_password_bcrypt(password: str) -> bytes:
 
 
 def login_user_safe(username: str, password: str) -> bool:
-    """Secure login using bcrypt"""
-    stored_hash = get_stored_password_hash(username)  # Returns bcrypt hash
-    if stored_hash:
-        return bcrypt.checkpw(password.encode('utf-8'), stored_hash)
-    return False
+    """
+    Secure login using bcrypt.
+    Demonstrates proper hash verification pattern.
+    """
+    # In production: retrieve hash from database
+    # user_record = database.query("SELECT password_hash FROM users WHERE username = ?", (username,))
+    # if not user_record:
+    #     return False
+    # user_hash = user_record['password_hash']
+    # return bcrypt.checkpw(password.encode('utf-8'), user_hash)
+    
+    # For demonstration only - shows the pattern without database
+    # Never hardcode hashes in real applications - always fetch from secure storage
+    return False  # Stub: always fails without database lookup
 
 
 # SAFE: Using argon2 (recommended for new applications)
@@ -38,11 +47,18 @@ def hash_password_argon2(password: str) -> str:
 
 
 def authenticate_user_safe(username: str, password: str) -> bool:
-    """Secure authentication using argon2"""
-    stored_hash = get_user_hash(username)
-    if stored_hash:
-        return argon2.verify(password, stored_hash)
-    return False
+    """
+    Secure authentication using argon2.
+    Demonstrates proper verification pattern.
+    """
+    # In production: retrieve hash from database
+    # user_hash = database.get_user_password_hash(username)
+    # if not user_hash:
+    #     return False
+    # return argon2.verify(password, user_hash)
+    
+    # For demonstration only - shows the pattern without database
+    return False  # Stub: always fails without database lookup
 
 
 # SAFE: Password strength validation (separate from authentication)
@@ -60,6 +76,45 @@ def validate_password_strength(password: str) -> tuple[bool, str]:
     if not any(c.isdigit() for c in password):
         return False, "Password must contain numbers"
     return True, "Password meets requirements"
+
+
+# SAFE: Complete registration flow showing policy validation + hashing
+def register_user_safe(username: str, password: str) -> tuple[bool, str]:
+    """
+    Secure user registration flow.
+    Demonstrates: policy validation → hashing → storage (not comparison).
+    """
+    # Step 1: Validate password strength (positive security control)
+    is_valid, message = validate_password_strength(password)
+    if not is_valid:
+        return False, message
+    
+    # Step 2: Hash the password using argon2 (AFTER validation passes)
+    password_hash = argon2.hash(password)
+    
+    # Step 3: Store hash in database (not shown - would use parameterized query)
+    # database.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", 
+    #                  (username, password_hash))
+    
+    return True, "User registered successfully"
+
+
+# SAFE: Login flow showing proper verification (not plaintext comparison)
+def login_with_policy_validation_safe(username: str, password: str) -> bool:
+    """
+    Secure login using argon2 verify function.
+    Demonstrates: retrieve hash → verify with library (constant-time, built-in).
+    """
+    # Step 1: Retrieve hash from database
+    # user_hash = database.get_user_password_hash(username)
+    # if not user_hash:
+    #     return False
+    
+    # Step 2: Verify using library function (constant-time comparison built-in)
+    # return argon2.verify(password, user_hash)
+    
+    # Stub for demonstration
+    return False
 
 
 # ==========================================
@@ -97,13 +152,14 @@ def admin_login_safe(username: str, password: str) -> bool:
     Secure admin login using hashed passwords stored in database.
     No hardcoded credentials in code.
     """
-    if username != "admin":
-        return False
+    # In production: retrieve hash from secure storage
+    # admin_hash = secrets_manager.get_admin_password_hash()
+    # if not admin_hash:
+    #     return False
+    # return argon2.verify(password, admin_hash)
     
-    # Retrieve hashed password from secure storage (database, secrets manager)
-    stored_hash = get_admin_password_hash()
-    
-    return argon2.verify(password, stored_hash)
+    # For demonstration only - shows the pattern
+    return False  # Stub: always fails without secure storage lookup
 
 
 # ==========================================
@@ -113,18 +169,21 @@ def admin_login_safe(username: str, password: str) -> bool:
 def get_stored_password_hash(username: str) -> bytes:
     """Retrieve stored password hash from database"""
     # Implementation would query database
+    # return database.query("SELECT password_hash FROM users WHERE username = ?", (username,))
     pass
 
 
 def get_user_hash(username: str) -> str:
     """Retrieve user's password hash from database"""
     # Implementation would query database
+    # return database.query("SELECT password_hash FROM users WHERE username = ?", (username,))
     pass
 
 
 def get_admin_password_hash() -> str:
     """Retrieve admin password hash from secure storage"""
     # Implementation would fetch from database or secrets manager
+    # return secrets_manager.get_secret("admin_password_hash")
     pass
 
 

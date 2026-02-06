@@ -65,8 +65,7 @@ def _make_finding(
     
     Scoring semantics (v0.1):
     - rule_score: canonical base score for this rule instance (impact * exploitability * confidence)
-    - score_contribution: post-weight score for aggregation (currently == rule_score for v0.1)
-    - Future (v0.2+): score_contribution may apply additional context/weighting multipliers
+    - Used in max_category model: overall_score = max(category_scores)
     """
     base_score_f = (impact_f * exploitability_f) / 10.0
     rule_score_f = round(base_score_f * confidence_f, 2)

@@ -2,7 +2,7 @@
 Tests for A06: Vulnerable & Outdated Components detector (v0.1)
 """
 from pathlib import Path
-from coderisk_ai.detectors.python.vulnerable_outdated_components import detect_vulnerable_outdated_components
+from coderisk_ai.detectors.python.a06_vulnerable_outdated_components import detect_vulnerable_outdated_components
 
 
 def test_unpinned_requirements_txt():

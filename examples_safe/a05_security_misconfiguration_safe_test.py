@@ -118,7 +118,7 @@ def create_secure_flask_app() -> Flask:
 # SAFE: Different configurations for different environments
 class DevelopmentConfig:
     """Development environment configuration"""
-    DEBUG = True  # OK for development
+    DEBUG = os.getenv("DEBUG", "false").lower() == "true"  # Safe: reads from environment
     TESTING = True
     CORS_ORIGINS = ['http://localhost:3000', 'http://localhost:8000']
 

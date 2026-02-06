@@ -49,6 +49,12 @@ _OPTIONAL_EXCEPTION_TYPES = [
     'CacheError', 'TimeoutError', 'RequestException'
 ]
 
+# Fallback indicators (suggests intentional fallback rather than silent swallow)
+_FALLBACK_PATTERN = re.compile(
+    r'\b(requests\.|http\.|backup|fallback|default|cache|optional|alternative|retry|secondary)\b',
+    re.IGNORECASE
+)
+
 # Telemetry detection patterns (expanded)
 _TELEMETRY_PATTERN = re.compile(
     r'\b(logger\.|logging\.|log\.|print\(|'
@@ -194,6 +200,37 @@ def detect_telemetry(body_lines: list[str]) -> bool:
         if _TELEMETRY_PATTERN.search(line):
             return True
     return False
+
+
+def detect_fallback_behavior(body_lines: list[str]) -> tuple[bool, str]:
+    """
+    Detect if exception handler implements a fallback behavior.
+    
+    Checks for:
+    - External calls (backup endpoints, secondary services)
+    - Cache/default value returns
+    - Retry/alternative path logic
+    - Explicit fallback patterns
+    
+    Returns (has_fallback, fallback_type).
+    """
+    body_text = '\n'.join(body_lines)
+    
+    # Check for fallback patterns
+    if _FALLBACK_PATTERN.search(body_text):
+        # Determine type of fallback
+        if re.search(r'\b(backup|secondary|alternative|retry)\b', body_text, re.IGNORECASE):
+            return True, "backup/retry"
+        if re.search(r'\b(cache|default|fallback)\b', body_text, re.IGNORECASE):
+            return True, "cache/default"
+    
+    # Check for return statements with values (potential default returns)
+    if re.search(r'\breturn\s+\w+', body_text, re.IGNORECASE):
+        # Only if it's not just "return None" or "return False"
+        if not re.search(r'\breturn\s+(None|False|True)\s*$', body_text, re.IGNORECASE):
+            return True, "default_value"
+    
+    return False, ""
 
 
 def _make_finding(
@@ -343,6 +380,7 @@ def detect_security_logging_monitoring_failures(source: str, file_path: str) -> 
                     lines, idx, body_start_idx, body_end_idx, exception_types
                 )
                 has_telemetry = detect_telemetry(body_lines)
+                has_fallback, fallback_type = detect_fallback_behavior(body_lines)
                 
                 # Check for empty handler (RULE 1: A09.EXCEPT.EMPTY_PASS)
                 is_empty = True
@@ -459,28 +497,62 @@ def detect_security_logging_monitoring_failures(source: str, file_path: str) -> 
                 if has_other_logic and not has_logging and not has_raise:
                     found_lines.add(idx)
                     
+                    # Detect fallback behavior
+                    has_fallback, fallback_type = detect_fallback_behavior(body_lines)
+                    
                     # Adjust impact and confidence based on context
                     impact = 7.0
                     exploitability = 6.5
                     confidence = 0.75
                     
+                    # Determine rule variant and messaging
+                    if has_fallback:
+                        # Fallback-without-telemetry: medium severity, acknowledge intentional fallback
+                        impact = 5.5
+                        confidence = 0.65
+                        rule_id = "A09.EXCEPT.FALLBACK_NO_TELEMETRY"
+                        title = "Fallback on exception without telemetry"
+                        description = (
+                            "Exception handler implements fallback logic but lacks telemetry. "
+                            "While fallback may be intentional, lack of logging reduces visibility into failure patterns."
+                        )
+                    else:
+                        # Silent swallow: higher severity
+                        rule_id = "A09.EXCEPT.SWALLOWED"
+                        title = "Swallowed exception detected"
+                        description = (
+                            "Exceptions are caught without logging or monitoring and without rethrowing, "
+                            "which can hide failures."
+                        )
+                    
                     # Apply adjustments
-                    if best_effort and not security_critical:
+                    if best_effort and not security_critical and not has_fallback:
                         # Best-effort without telemetry: still report but lower severity
                         impact = 5.5
                         confidence = 0.65
                     
                     # Build explanation
                     explanation_parts = [
-                        f"Exception handler for '{exception_types}' executes logic but does not log "
-                        "the exception or rethrow it. This hides failures from monitoring systems and "
-                        "makes it difficult to detect security incidents or operational issues."
+                        f"Exception handler for '{exception_types}' "
                     ]
+                    
+                    if has_fallback:
+                        explanation_parts.append(
+                            f"implements a {fallback_type} fallback but does not log "
+                            "the exception or emit metrics. While fallback behavior may be intentional, "
+                            "lack of telemetry makes it difficult to track failure rates and patterns."
+                        )
+                    else:
+                        explanation_parts.append(
+                            "executes logic but does not log "
+                            "the exception or rethrow it. This hides failures from monitoring systems and "
+                            "makes it difficult to detect security incidents or operational issues."
+                        )
                     
                     if security_critical:
                         explanation_parts.append(f" Security-critical context detected ({sec_reason}).")
                     
-                    if best_effort:
+                    if best_effort and not has_fallback:
                         explanation_parts.append(
                             f" Best-effort context detected ({best_reason}), but telemetry is still "
                             "recommended for visibility into failure rates."
@@ -491,7 +563,13 @@ def detect_security_logging_monitoring_failures(source: str, file_path: str) -> 
                     snippet = '\n'.join(snippet_lines)
                     
                     # Choose appropriate recommended fix
-                    if security_critical:
+                    if has_fallback:
+                        recommended_fix = (
+                            "Add logging (logger.warning or logger.exception) to record when fallback paths "
+                            "are taken. Include metrics/counters to track fallback frequency and help identify "
+                            "patterns. Include sufficient context (correlation IDs, resource names) for troubleshooting."
+                        )
+                    elif security_critical:
                         recommended_fix = (
                             "Emit telemetry (counter/trace) for failure paths and include context such as "
                             "request IDs, user identifiers, or resource names. Log at error level using "
@@ -513,9 +591,9 @@ def detect_security_logging_monitoring_failures(source: str, file_path: str) -> 
                     
                     findings.append(
                         _make_finding(
-                            finding_id="A09.EXCEPT.SWALLOWED",
-                            title="Swallowed exception detected",
-                            description="Exceptions are caught without logging or monitoring and without rethrowing, which can hide failures.",
+                            finding_id=rule_id,
+                            title=title,
+                            description=description,
                             file_path=file_path,
                             line_no=except_line_no,
                             snippet=snippet.strip(),
@@ -527,7 +605,10 @@ def detect_security_logging_monitoring_failures(source: str, file_path: str) -> 
                             exploit_scenario=(
                                 "Attackers can trigger exceptions in critical paths (authentication, authorization, "
                                 "data validation) that are silently handled without logging, allowing them to bypass "
-                                "security controls or cause data integrity issues without detection."
+                                "security controls or cause data integrity issues without detection." if not has_fallback else
+                                "Repeated fallback executions without visibility can hide systemic issues, performance "
+                                "degradation, or targeted attacks. Lack of telemetry prevents correlation analysis and "
+                                "incident response."
                             ),
                             recommended_fix=recommended_fix,
                             security_critical=security_critical,

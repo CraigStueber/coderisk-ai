@@ -90,6 +90,55 @@ class SSRFDetector(ast.NodeVisitor):
                 self.has_fastapi = True
         self.generic_visit(node)
     
+    def _extract_taint_path(self, node: ast.AST) -> str:
+        """Extract specific path from a taint source (e.g., 'request.args.url', 'os.environ.API_URL')."""
+        if isinstance(node, ast.Subscript):
+            # Handle subscript access like request.args["url"] or os.environ["API_URL"]
+            base_source, _ = self._is_taint_source(node.value)
+            if base_source:
+                # Try to extract the subscript key
+                if isinstance(node.slice, ast.Constant):
+                    if isinstance(node.slice.value, str):
+                        base_name = self._node_to_string(node.value)
+                        return f"{base_name}.{node.slice.value}"
+                elif isinstance(node.slice, ast.Str):  # Python 3.7 compatibility
+                    base_name = self._node_to_string(node.value)
+                    return f"{base_name}.{node.slice.s}"
+        
+        # Handle method calls like request.args.get("url")
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "get":
+                base_source, _ = self._is_taint_source(node.func.value)
+                if base_source and node.args:
+                    if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                        base_name = self._node_to_string(node.func.value)
+                        return f"{base_name}.{node.args[0].value}"
+                    elif isinstance(node.args[0], ast.Str):  # Python 3.7 compatibility
+                        base_name = self._node_to_string(node.func.value)
+                        return f"{base_name}.{node.args[0].s}"
+        
+        # Default: return the basic source name
+        return self._node_to_string(node)
+    
+    def _node_to_string(self, node: ast.AST) -> str:
+        """Convert an AST node to a readable string representation."""
+        if isinstance(node, ast.Name):
+            return node.id
+        elif isinstance(node, ast.Attribute):
+            return f"{self._node_to_string(node.value)}.{node.attr}"
+        elif isinstance(node, ast.Subscript):
+            base = self._node_to_string(node.value)
+            if isinstance(node.slice, ast.Constant):
+                return f"{base}[{repr(node.slice.value)}]"
+            elif isinstance(node.slice, ast.Str):  # Python 3.7 compatibility
+                return f"{base}[{repr(node.slice.s)}]"
+            return f"{base}[...]"
+        elif isinstance(node, ast.Call):
+            func = self._node_to_string(node.func)
+            return f"{func}()"
+        else:
+            return "<expr>"
+    
     def _is_taint_source(self, node: ast.AST) -> tuple[bool, str]:
         """Check if a node represents a taint source. Returns (is_tainted, source_name)."""
         # input() call
@@ -308,20 +357,76 @@ class SSRFDetector(ast.NodeVisitor):
                 
                 base_score = (impact * exploitability) / 10.0
                 rule_score = round(base_score * confidence, 2)
-                severity = _severity_from_score(rule_score)
+                
+                # POLICY: SSRF findings MUST be severity="high"
+                # Override score-based severity calculation
+                severity = "high"
+                
+                # Build structured sink information
+                sink = {
+                    "type": "http_request",
+                    "function": sink_function,
+                }
+                
+                # Build structured taint source information
+                taint_sources = []
+                # Extract taint type from explanation
+                taint_type = "unknown"
+                taint_symbol = ""
+                taint_path = self._extract_taint_path(url_arg)
+                
+                if "input()" in taint_explanation:
+                    taint_type = "input"
+                    taint_symbol = "input()"
+                elif "sys.argv" in taint_explanation:
+                    taint_type = "command_line_arg"
+                    taint_symbol = "sys.argv"
+                elif "os.environ" in taint_explanation:
+                    taint_type = "environment_variable"
+                    taint_symbol = "os.environ"
+                elif "os.getenv" in taint_explanation:
+                    taint_type = "environment_variable"
+                    taint_symbol = "os.getenv()"
+                elif "request.args" in taint_explanation:
+                    taint_type = "web_parameter"
+                    taint_symbol = "request.args"
+                elif "request.form" in taint_explanation:
+                    taint_type = "web_parameter"
+                    taint_symbol = "request.form"
+                elif "request.json" in taint_explanation:
+                    taint_type = "web_parameter"
+                    taint_symbol = "request.json"
+                elif "request." in taint_explanation:
+                    taint_type = "web_parameter"
+                    taint_symbol = "request"
+                elif "via variable" in taint_explanation:
+                    taint_type = "derived"
+                    # Try to extract variable name
+                    import re
+                    match = re.search(r"via variable '(\w+)'", taint_explanation)
+                    if match:
+                        taint_symbol = match.group(1)
+                
+                taint_sources.append({
+                    "type": taint_type,
+                    "symbol": taint_symbol,
+                    "path": taint_path,
+                    "confidence": confidence,
+                })
                 
                 # Build detailed explanation
                 explanation = f"Call to {sink_function} with URL derived from {taint_explanation}."
                 
                 finding = {
                     "rule_id": "A10_SSRF.HTTP_REQUEST_TAINTED_URL",
-                    "id": f"A10_SSRF.HTTP_REQUEST_TAINTED_URL:{self.file_path}:{lineno}",
                     "title": f"Server-Side Request Forgery via {sink_function}" ,
                     "description": f"The function {sink_function} is called with a URL derived from {taint_explanation}. This allows an attacker to make the server send requests to arbitrary destinations.",
                     "category": "A10_ssrf",
                     "severity": severity,
                     "rule_score": rule_score,
                     "confidence": confidence,
+                    "sink": sink,
+                    "taint_sources": taint_sources,
                     "exploit_scenario": f"An attacker can control the URL passed to {sink_function} via {taint_explanation}. This enables accessing internal services (cloud metadata at 169.254.169.254, internal APIs, databases), port scanning internal networks, or exfiltrating data via DNS/HTTP callbacks.",
                     "recommended_fix": "Validate and sanitize URLs before making requests. Use an allowlist of permitted domains/schemes. Avoid directly using user input in URL construction. Consider using a proxy or firewall to restrict outbound requests.",
                     "evidence": {

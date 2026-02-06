@@ -1,6 +1,6 @@
 # CodeRisk AI
 
-**CodeRisk AI** is a **probabilistic security scoring framework for AI-generated code**.
+CodeRisk AI is a probabilistic security scoring framework for AI-generated code.
 
 It analyzes code produced by copilots and large language models and produces:
 
@@ -20,57 +20,63 @@ Traditional static analysis answers a narrow question:
 
 > "Is there a known vulnerability here?"
 
-AI-generated code introduces additional, systemic risks that are harder to reason about:
+AI-generated code introduces systemic risk patterns that don't behave like traditional vulnerabilities:
 
 - **Plausible-looking logic** that is subtly incorrect
 - **Inconsistent behavior** under small prompt or context changes
 - **Invented APIs or phantom dependencies**
 - **Unsafe defaults** (permissive access, weak validation, unsafe deserialization)
-- **Security-critical checks** commented out or partially removed
+- **Security checks** commented out or partially removed
 
-These risks are often **not binary** and **not deterministic**.
+These risks are often **probabilistic, context-dependent, and non-deterministic**.
 
-CodeRisk AI is designed to quantify this uncertainty in a way that is:
+CodeRisk AI exists to quantify that uncertainty in a way that is:
 
-- **bounded** (scores are always within known limits)
-- **explainable** (every score is traceable to findings)
-- **auditable** (deterministic analysis first, AI second)
-- **repeatable** (designed for governance and review workflows)
+- **bounded** (scores always live in known ranges)
+- **explainable** (every score maps to evidence)
+- **auditable** (deterministic analysis first)
+- **repeatable** (designed for governance, not demos)
 
 ---
 
-## What CodeRisk AI does today (v0.1)
+## What CodeRisk AI does today
 
-### ✔️ Deterministic analysis first
+### ✔ Deterministic analysis first
 
-CodeRisk AI currently performs file- and directory-level analysis for **Python code** and detects security issues aligned to the **OWASP Top 10**, including:
+CodeRisk AI performs file- and directory-level analysis for **Python code**, detecting security issues aligned to the **OWASP Top 10**.
+
+Examples include:
 
 #### **A01 – Broken Access Control**
 
-- Missing authentication decorators (Flask/FastAPI)
-- Commented-out authorization checks
+- Missing authentication decorators
+- Disabled or commented-out authorization checks
 
 #### **A03 – Injection**
 
-- SQL query construction via string concatenation
+- SQL query construction via string concatenation or interpolation
 
 #### **A08 – Software and Data Integrity Failures**
 
 - Unsafe deserialization (e.g., `pickle.loads` on untrusted input)
 
-Each detector produces **structured findings** with:
+#### **A09 – Security Logging & Monitoring Failures**
 
-- stable IDs
-- severity
+- Swallowed exceptions
+- Fallback behavior without telemetry
+
+Each detector emits **structured findings** with:
+
+- stable rule IDs
+- severity and confidence
 - evidence (file, line, snippet)
 - CWE and OWASP references
-- confidence estimates
 
-### ✔️ Probabilistic scoring model
+### ✔ Probabilistic scoring model
 
 Findings are aggregated into:
 
-- **OWASP category scores** (capped at 10)
+- **OWASP category scores** (0–10)
 - a **composite overall risk score**
 - a **confidence score** representing stability, not correctness
 
@@ -80,17 +86,18 @@ The scoring model explicitly separates:
 - **exploitability**
 - **uncertainty**
 
-This avoids the common failure mode of treating vulnerability counts as risk.
+This avoids the common failure mode of treating vulnerability counts as "risk."
 
-### ✔️ Behavioral risk signals (v0.1 stubs)
+### ✔ AI-specific behavioral signals (early scaffolding)
 
-CodeRisk AI also emits **AI-specific risk signals**, currently stubbed but structurally complete:
+CodeRisk AI also emits **AI-specific risk signals**.  
+In v0.1 these are structurally complete but intentionally conservative:
 
 - Hallucination markers
 - Non-determinism sensitivity
 - Dependency volatility
 
-These signals will be expanded as the framework evolves.
+These signals will mature as the framework evolves, but are already integrated into the output schema to support future governance workflows.
 
 ---
 
@@ -105,26 +112,13 @@ Produces output similar to:
 ```json
 {
   "summary": {
-    "overall_score": 10.0,
+    "overall_score": 7.0,
     "confidence": 0.7,
     "owasp": {
-      "A01_access_control": 10.0,
-      "A03_injection": 4.8,
-      "A08_integrity_failures": 5.04
+      "A01_access_control": 6.5,
+      "A03_injection": 4.8
     }
-  },
-  "findings": [
-    {
-      "id": "ACCESS_CONTROL.MISSING.FLASK_AUTH",
-      "severity": "medium",
-      "category": "A01_access_control",
-      "evidence": {
-        "file": "examples/broken_access_control.py",
-        "line_start": 13,
-        "snippet": "@app.route(\"/users/<int:user_id>/delete\")"
-      }
-    }
-  ]
+  }
 }
 ```
 
@@ -132,75 +126,135 @@ Produces output similar to:
 
 ## Design philosophy
 
-CodeRisk AI intentionally follows these principles:
-
 ### **Deterministic before probabilistic**
 
-Core analysis and scoring are rule-based and auditable.
+All findings are rule-based, auditable, and reproducible.
 
 ### **Confidence ≠ severity**
 
-A severe issue can still have low confidence, and vice versa.
+A severe issue may still have low confidence, and vice versa.
 
 ### **AI as an advisor, not an authority**
 
-Language models are not allowed to invent findings or silently modify code.
+Language models never invent findings or silently modify code.
 
 ### **Governance over automation theater**
 
-The output is designed for security review, risk acceptance, and audit trails.
+Outputs are designed for review, risk acceptance, and audit trails.
 
 ---
 
-## Roadmap (intentional and phased)
+## Roadmap
 
-### **Phase 1 (current): Python + OWASP Top 10**
+CodeRisk AI is intentionally phased, with each stage adding capability without breaking governance guarantees or weakening auditability.
 
-- Complete Python detectors for all OWASP Top 10 categories
-- Stabilize scoring and output schema
-- Establish baseline confidence and uncertainty handling
+### **Phase 1 – Python Scan (current)**
 
-### **Phase 2: AI-assisted explanation and remediation guidance**
+**Focus**: establish a trustworthy analytical core.
 
-After deterministic analysis is complete, CodeRisk AI will introduce an **optional AI advisory layer**:
+- Python-only support
+- Deterministic OWASP Top 10 detectors
+- Stable scoring model and output schema
+- Clear separation of findings, scores, and confidence
+- Reference corpora:
+  - intentionally vulnerable examples
+  - hardened "safe" implementations
 
-#### **AI explains the issue**
+**Status**:
 
-- Why it matters
-- How it could be exploited
-- What assumptions make it risky
+- ✔ In active development
+- ✔ Scoring and schema stabilizing
+- ✔ Suitable as a research artifact and CLI tool
 
-#### **AI suggests remediation options**
+### **Phase 2 – LLM-Assisted Explanation (Advisory Only)**
 
-- Secure patterns
-- Framework-specific guidance
-- Tradeoffs and caveats
+**Focus**: help humans understand why a finding exists — without changing what was found.
+
+In this phase, an optional LLM advisory layer is introduced **after deterministic analysis completes**.
+
+The LLM is used to:
+
+- Explain what the issue is in plain language
+- Describe why it matters from a security perspective
+- Walk through how it could realistically be exploited
+- Clarify assumptions and context that make the issue risky
+- Highlight tradeoffs in remediation options
 
 **Critically**:
 
-- The AI **does not generate findings**
-- The AI **does not silently change code**
-- All advice is grounded in the existing, structured analysis output
+- The LLM **does not generate findings**
+- The LLM **does not change scores**
+- The LLM **does not modify code**
+- All explanations are grounded in existing structured findings
 
-This keeps humans firmly in the loop.
+Think of this phase as:
 
-### **Phase 3: Multi-language support**
+> "Translate the evidence into human reasoning — without adding new evidence."
 
-Once the Python OWASP Top 10 baseline is complete, CodeRisk AI will expand to:
+This preserves auditability while reducing cognitive load during review.
 
-#### **JavaScript / TypeScript**
+### **Phase 3 – User Interface**
 
-- Node.js, Express, frontend-to-backend boundaries
+**Focus**: make risk inspectable, not just machine-readable.
 
-#### **Java**
+- Local web UI for browsing results
+- Visual OWASP breakdowns
+- Drill-down from score → category → finding → evidence
+- Explicit confidence and uncertainty display
 
-- Spring security, serialization, configuration risks
+Designed for:
 
-Each language will follow the same model:
+- security reviews
+- engineering discussions
+- risk acceptance documentation
 
-- deterministic detectors first
-- consistent scoring semantics
-- shared governance-friendly output schema
+**No auto-fixing. No magic buttons.**
+
+### **Phase 4 – JavaScript / TypeScript Support**
+
+**Focus**: extend the model without changing its semantics.
+
+- Node.js and Express backends
+- Frontend-to-backend boundary risks
+- Injection, auth, deserialization, and configuration patterns
+- Same scoring model
+- Same confidence semantics
+- Same output schema
+
+**Key constraint**:  
+Multi-language support must feel **boring and consistent**, not flashy.
+
+### **Phase 4a – VS Code Extension**
+
+**Focus**: bring visibility closer to where AI-generated code is written.
+
+- On-save or on-demand analysis
+- Inline annotations tied to CodeRisk findings
+- OWASP category summaries per file
+
+**Hard constraints**:
+
+- **No background code modification**
+- **No autonomous execution**
+
+The extension **observes and reports** — it does not act.
+
+### **Phase 5 – GitHub Action**
+
+**Focus**: governance at the pipeline level.
+
+- Run CodeRisk AI in CI
+- Produce structured artifacts (JSON, SARIF-style)
+- Fail or warn based on policy thresholds
+
+Support:
+
+- pull request reviews
+- risk gating
+- audit trails
+
+**This is not security theater CI.**  
+It is a measurement checkpoint.
 
 ---
 
@@ -209,7 +263,7 @@ Each language will follow the same model:
 CodeRisk AI is **not** intended to:
 
 - replace expert security review
-- auto-patch code without human approval
+- auto-patch code without approval
 - claim vulnerability completeness
 - act as a generic "AI code fixer"
 
@@ -219,7 +273,7 @@ CodeRisk AI is **not** intended to:
 
 ## Status
 
-This project is under active development and is intended as:
+CodeRisk AI is under active development and intended as:
 
 - a **practical security tool**
 - a **research artifact**

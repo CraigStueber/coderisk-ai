@@ -87,13 +87,13 @@ def test_sensitive_routes_still_detected():
     
     # Check if broken_access_control.py example exists
     import os
-    if not os.path.exists('examples/broken_access_control.py'):
-        print("⚠️  SKIPPED: examples/broken_access_control.py not found")
+    if not os.path.exists('examples/a01_broken_access_control_test.py'):
+        print("⚠️  SKIPPED: examples/a01_broken_access_control_test.py not found")
         return True
     
     result = subprocess.run(
         ['python', '-m', 'coderisk_ai.cli', 'analyze',
-         'examples/broken_access_control.py'],
+         'examples/a01_broken_access_control_test.py'],
         capture_output=True, text=True
     )
     
@@ -113,7 +113,7 @@ def test_sensitive_routes_still_detected():
                 print(f"   Line {inst['line_start']}: {inst['snippet'][:60]}")
         return True
     else:
-        print("⚠️  No Flask auth findings in broken_access_control.py")
+        print("⚠️  No Flask auth findings in a01_broken_access_control_test.py")
         return True
 
 
